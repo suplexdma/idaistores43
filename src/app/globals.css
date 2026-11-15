@@ -1,27 +1,167 @@
+@import url("https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu:wght@400;500;600;700&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
+  --brand-olive: #719347;
+  --brand-gold: #d9a63b;
+  --brand-charcoal: #1a1a1a;
+  --brand-white: #fdfdfd;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
 }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  min-height: 100vh;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+.tiptap p.is-editor-empty:first-child::before {
+  color: hsl(var(--muted-foreground));
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+.product-rich-text p {
+  margin: 0.4rem 0;
+}
+
+.product-rich-text ul,
+.product-rich-text ol {
+  margin: 0.6rem 0;
+  padding-left: 1.5rem;
+}
+
+.product-rich-text ul {
+  list-style: disc;
+}
+
+.product-rich-text ol {
+  list-style: decimal;
+}
+
+.product-rich-text li {
+  margin: 0.25rem 0;
+}
+
+html[lang="ur"] body {
+  font-family: "Noto Nastaliq Urdu", "Noto Sans Arabic", serif;
+  line-height: 2;
+}
+
+html[lang="ur"] button,
+html[lang="ur"] input,
+html[lang="ur"] textarea,
+html[lang="ur"] select {
+  font: inherit;
+}
+
+html[dir="rtl"] .rtl-flip {
+  transform: scaleX(-1);
+}
+
+html[dir="rtl"] .left-5 {
+  right: 1.25rem;
+  left: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+}
+@layer base {
+  :root {
+    --background: 0 0% 99.2%;
+    --foreground: 0 0% 10.2%;
+    --card: 0 0% 99.2%;
+    --card-foreground: 0 0% 10.2%;
+    --popover: 0 0% 99.2%;
+    --popover-foreground: 0 0% 10.2%;
+    --primary: 87 35% 43%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 41 68% 54%;
+    --secondary-foreground: 0 0% 10.2%;
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 42%;
+    --accent: 41 68% 54%;
+    --accent-foreground: 0 0% 10.2%;
+    --destructive: 0 72% 51%;
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 87 35% 43%;
+    --chart-1: 87 35% 43%;
+    --chart-2: 41 68% 54%;
+    --chart-3: 0 0% 10.2%;
+    --chart-4: 87 25% 63%;
+    --chart-5: 41 55% 70%;
+    --radius: 0.5rem;
+    --sidebar: 0 0% 99.2%;
+    --sidebar-foreground: 0 0% 10.2%;
+    --sidebar-primary: 87 35% 43%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 41 68% 54%;
+    --sidebar-accent-foreground: 0 0% 10.2%;
+    --sidebar-border: 0 0% 90%;
+    --sidebar-ring: 87 35% 43%;
+  }
+  .dark {
+    --background: 0 0% 10.2%;
+    --foreground: 0 0% 99.2%;
+    --card: 0 0% 13%;
+    --card-foreground: 0 0% 99.2%;
+    --popover: 0 0% 13%;
+    --popover-foreground: 0 0% 99.2%;
+    --primary: 87 35% 51%;
+    --primary-foreground: 0 0% 10.2%;
+    --secondary: 41 68% 61%;
+    --secondary-foreground: 0 0% 10.2%;
+    --muted: 0 0% 18%;
+    --muted-foreground: 0 0% 70%;
+    --accent: 41 68% 61%;
+    --accent-foreground: 0 0% 10.2%;
+    --destructive: 0 62% 40%;
+    --border: 0 0% 100% / 10%;
+    --input: 0 0% 100% / 15%;
+    --ring: 87 35% 51%;
+    --chart-1: 87 35% 51%;
+    --chart-2: 41 68% 61%;
+    --chart-3: 0 0% 80%;
+    --chart-4: 87 25% 45%;
+    --chart-5: 41 55% 48%;
+    --sidebar: 0 0% 13%;
+    --sidebar-foreground: 0 0% 99.2%;
+    --sidebar-primary: 87 35% 51%;
+    --sidebar-primary-foreground: 0 0% 10.2%;
+    --sidebar-accent: 41 68% 61%;
+    --sidebar-accent-foreground: 0 0% 10.2%;
+    --sidebar-border: 0 0% 100% / 10%;
+    --sidebar-ring: 93 27% 58%;
+  }
+}
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
   }
 }
