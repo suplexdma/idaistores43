@@ -5,12 +5,12 @@ import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 const ranges = [
-  { value: "year", label: "1 Year" },
+  { value: "year", label: "Yearly" },
   { value: "6months", label: "6 Months" },
   { value: "3months", label: "3 Months" },
-  { value: "month", label: "1 Month" },
+  { value: "month", label: "Monthly" },
   { value: "7days", label: "7 Days" },
-  { value: "day", label: "1 Day" },
+  { value: "day", label: "Daily" },
   { value: "hours", label: "Hours" },
   { value: "minutes", label: "Minutes" },
 ] as const;
@@ -23,9 +23,10 @@ type Point = {
   confirmed: number;
   returned: number;
   sales: number;
+  profit: number;
 };
 type ReturnPoint = { timestamp: string; label: string; returned: number };
-type ChartSeries = { key: string; label: string; color: string };
+type ChartSeries = { key: string; label: string; color: string; format?: (value: number) => string };
 
 function TimeSeriesChart({
   points,
@@ -41,22 +42,27 @@ function TimeSeriesChart({
   const padX = 58;
   const padTop = 16;
   const padBottom = 34;
-  const maximum = Math.max(1, ...points.flatMap((point) =>
+  const maximum = Math.max(0, ...points.flatMap((point) =>
+    series.map((item) => Number(point[item.key]) || 0),
+  ));
+  const minimum = Math.min(0, ...points.flatMap((point) =>
     series.map((item) => Number(point[item.key]) || 0),
   ));
   const yAxisMax = Math.max(4, Math.ceil(maximum / 4) * 4);
+  const yAxisMin = Math.min(0, Math.floor(minimum / 4) * 4);
+  const yAxisRange = yAxisMax - yAxisMin || 1;
   const denominator = Math.max(points.length - 1, 1);
   const coordinates = points.map((point, index) => ({
     x: padX + ((width - padX * 2) * index) / denominator,
     point,
   }));
-  const yFor = (value: number) => height - padBottom - ((height - padTop - padBottom) * value) / yAxisMax;
+  const yFor = (value: number) => height - padBottom - ((height - padTop - padBottom) * (value - yAxisMin)) / yAxisRange;
   const formatValue = (value: number) => value.toLocaleString("en-PK");
 
   return (
     <svg role="img" aria-label={ariaLabel} viewBox="0 0 900 270" preserveAspectRatio="none" className="h-64 w-full overflow-visible">
       {[0, 1, 2, 3, 4].map((tick) => {
-        const value = (yAxisMax * tick) / 4;
+        const value = yAxisMin + (yAxisRange * tick) / 4;
         const y = yFor(value);
         return (
           <g key={tick}>
@@ -94,8 +100,8 @@ function TimeSeriesChart({
                 timeZone: "Asia/Karachi",
               }).format(new Date(point.timestamp));
               return (
-                <circle key={`${item.key}-${point.timestamp}`} cx={x} cy={yFor(value)} r="4" fill="white" stroke={item.color} strokeWidth="3">
-                  <title>Date: {date}, {item.label}: {value}</title>
+                <circle key={`${item.key}-${point.timestamp}`} cx={x} cy={yFor(value)} r="4" fill="white" stroke={item.color} strokeWidth="3" tabIndex={0} aria-label={`${date}, ${item.label}: ${item.format ? item.format(value) : formatValue(value)}`}>
+                  <title>Date: {date}, {item.label}: {item.format ? item.format(value) : formatValue(value)}</title>
                 </circle>
               );
             })}
@@ -121,6 +127,7 @@ function TimeSeriesChart({
 
 export function OrdersGraph() {
   const [range, setRange] = useState<Range>("7days");
+  const [metric, setMetric] = useState<"sales" | "profit" | "orders">("sales");
   const [points, setPoints] = useState<Point[]>([]);
   const [returnPoints, setReturnPoints] = useState<ReturnPoint[]>([]);
   const [loading, setLoading] = useState(true);
@@ -156,31 +163,48 @@ export function OrdersGraph() {
 
   const formatRangeValue = (value: number) => value.toLocaleString("en-PK");
   const totalOrders = points.reduce((sum, point) => sum + point.orders, 0);
-  const totalConfirmed = points.reduce((sum, point) => sum + point.confirmed, 0);
-  const totalReturned = points.reduce((sum, point) => sum + point.returned, 0);
+  const totalMetric = points.reduce((sum, point) => sum + point[metric], 0);
+  const reportSeries: ChartSeries = {
+    key: metric,
+    label: metric === "sales" ? "Sales" : metric === "profit" ? "Profit" : "Orders",
+    color: metric === "sales" ? "#719347" : metric === "profit" ? "#16a34a" : "#9333ea",
+    ...(metric !== "orders" ? { format: (value: number) => `PKR ${value.toLocaleString("en-PK", { maximumFractionDigits: 2 })}` } : {}),
+  };
+  const formattedMetric = metric === "orders"
+    ? formatRangeValue(totalMetric)
+    : `PKR ${totalMetric.toLocaleString("en-PK", { maximumFractionDigits: 2 })}`;
 
   return (
     <div className="space-y-6">
     <Card className="overflow-hidden rounded-2xl border-black/[0.06] bg-white shadow-sm">
       <CardHeader className="gap-5 border-b border-black/[0.05] bg-white sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <CardTitle className="text-lg">Orders graph</CardTitle>
-          <p className="mt-1 text-sm text-muted-foreground">Order volume · Pakistan Standard Time (UTC+5)</p>
+          <CardTitle className="text-lg">Sales reports</CardTitle>
+          <p className="mt-1 text-sm text-muted-foreground">Sales, estimated profit (including return delivery loss), and orders · Pakistan Standard Time (UTC+5)</p>
         </div>
-        <div className="flex flex-wrap gap-1 rounded-lg bg-muted/70 p-1" role="group" aria-label="Graph time range">
-          {ranges.map((item) => (
-            <button
-              key={item.value}
-              type="button"
-              onClick={() => setRange(item.value)}
-              aria-pressed={range === item.value}
-              className={`rounded-md px-2.5 py-1.5 text-xs font-medium transition ${
-                range === item.value ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {item.label}
-            </button>
-          ))}
+        <div className="flex flex-col gap-2 sm:items-end">
+          <div className="flex flex-wrap gap-1 rounded-lg bg-muted/70 p-1" role="group" aria-label="Sales report period">
+            {ranges.map((item) => (
+              <button
+                key={item.value}
+                type="button"
+                onClick={() => setRange(item.value)}
+                aria-pressed={range === item.value}
+                className={`rounded-md px-2.5 py-1.5 text-xs font-medium transition ${
+                  range === item.value ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-1" role="group" aria-label="Sales report metric">
+            {(["sales", "profit", "orders"] as const).map((value) => (
+              <button key={value} type="button" onClick={() => setMetric(value)} aria-pressed={metric === value} className={`rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition ${metric === value ? "bg-brand-olive text-white" : "text-muted-foreground hover:bg-muted"}`}>
+                {value}
+              </button>
+            ))}
+          </div>
         </div>
       </CardHeader>
       <CardContent className="p-5 sm:p-7">
@@ -190,35 +214,25 @@ export function OrdersGraph() {
           <div role="status" aria-label="Loading orders graph" className="h-56 animate-pulse rounded-lg bg-muted/50" />
         ) : (
           <>
-            <div className="mb-4 flex items-baseline gap-2">
-              <span className="text-3xl font-semibold">{formatRangeValue(totalOrders)}</span>
-              <span className="text-sm text-muted-foreground">orders in selected period</span>
+            <div className="mb-4 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <span className="text-3xl font-semibold">{formattedMetric}</span>
+              <span className="text-sm text-muted-foreground">{reportSeries.label.toLowerCase()} in selected period</span>
             </div>
             <div className="mb-3 flex flex-wrap gap-x-5 gap-y-2 text-xs">
-              {[
-                { label: `Total orders (${totalOrders})`, color: "#719347" },
-                { label: `Confirmed / completed (${totalConfirmed})`, color: "#16a34a" },
-                { label: `Returned (${totalReturned})`, color: "#9333ea" },
-              ].map((item) => (
-                <span key={item.label} className="inline-flex items-center gap-2 text-muted-foreground">
-                  <span aria-hidden="true" className="size-2.5 rounded-full" style={{ backgroundColor: item.color }} />
-                  {item.label}
-                </span>
-              ))}
+              <span className="inline-flex items-center gap-2 text-muted-foreground">
+                <span aria-hidden="true" className="size-2.5 rounded-full" style={{ backgroundColor: reportSeries.color }} />
+                {reportSeries.label}: {metric === "orders" ? formatRangeValue(totalOrders) : formattedMetric}
+              </span>
             </div>
             <TimeSeriesChart
-              ariaLabel={`Total, confirmed, and returned order counts over ${ranges.find((item) => item.value === range)?.label}`}
+              ariaLabel={`${reportSeries.label} over ${ranges.find((item) => item.value === range)?.label}`}
               points={points}
-              series={[
-                { key: "orders", label: "Total orders", color: "#719347" },
-                { key: "confirmed", label: "Confirmed / completed", color: "#16a34a" },
-                { key: "returned", label: "Returned orders", color: "#9333ea" },
-              ]}
+              series={[reportSeries]}
             />
             <div className="sr-only">
               {points.map((point) => (
                 <p key={point.timestamp}>
-                  {point.label}: {point.orders} total orders, {point.confirmed} confirmed or completed, {point.returned} returned
+                  {point.label}: {point.orders} orders, PKR {point.sales} sales, PKR {point.profit} profit, {point.confirmed} confirmed or completed, {point.returned} returned
                 </p>
               ))}
             </div>

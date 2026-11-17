@@ -12,6 +12,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { getCartItemKey, useCartStore } from "@/lib/cart-store";
+import { optimizedImageUrl } from "@/lib/cloudinary-url";
 
 export const FREE_DELIVERY_THRESHOLD = 2000;
 export const STANDARD_DELIVERY_CHARGE = 300;
@@ -65,7 +66,7 @@ export function CartDrawer() {
                     >
                       {item.image && (
                         <Image
-                          src={item.image}
+                          src={optimizedImageUrl(item.image)}
                           alt={item.name}
                           fill
                           sizes="80px"

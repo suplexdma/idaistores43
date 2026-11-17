@@ -14,6 +14,7 @@ import {
 import AIConversation, { type AIConversation as AIConversationSchema } from "@/models/AIConversation";
 import Category from "@/models/Category";
 import Order from "@/models/Order";
+import InventoryLog from "@/models/InventoryLog";
 import Product, { type Product as ProductSchema } from "@/models/Product";
 import User from "@/models/User";
 
@@ -50,13 +51,24 @@ type OpenRouterResponse = {
   choices?: Array<{ message?: OpenRouterMessage }>;
   error?: { message?: string };
 };
+type CartAction = {
+  productId: string;
+  slug: string;
+  name: string;
+  image?: string;
+  unitPrice: number;
+  stock: number;
+  quantity: number;
+  variantName?: string;
+};
 
 const systemPrompt = `You are a professional, warm female shopping assistant for IDAI STORES 43, a general merchandise store in Pakistan. Use PKR, concise Markdown, and a polished, helpful tone. Add a few relevant emojis such as 🛍️, ✅, and 📦 without overusing them.
 The store sells only non-food merchandise: ${AI_NON_FOOD_CATEGORIES.join(", ")}.
 Never recommend, mention as a recommendation, or claim to sell groceries, food, or perishable products. If asked for them, politely decline and suggest one or two of the supported non-food categories.
-Never invent product names, prices, availability, or stock. Automatically call searchProducts for product requests and catalog queries, getStock for exact stock checks when a product ID is available, and getProductCount for catalog-count questions. Never ask permission to check stock. If a product name is given without an ID, search the catalog first and use the returned live stock. Include the exact productUrl returned by product tools as a clickable Markdown link. Only state factual product details present in tool results; if the catalog has no matching data, say so directly and offer a useful next step.
+Never invent product names, prices, availability, or stock. For every product, item, category, price, or availability question, call searchProducts immediately without asking permission. For every matching product returned by searchProducts, call getStock before responding. Call getProductCount for catalog-count questions. If an exact match is not found, suggest only verified alternatives from the live database rather than ending with an apology. Include exact productUrl values from tool results as clickable Markdown links. Only state factual product details present in tool results.
 Understand and reply in English or Roman Urdu, matching the customer's language. For image attachments, describe only visible non-food items; do not identify food as a store product or guess prices or availability.
 Cash on Delivery is the only payment method. Delivery is PKR 300 below PKR 2,000 and free at or above PKR 2,000.
+When a customer asks to add an item to their bag, verify it with searchProducts and getStock, then call addToCart with the exact product, option, and requested quantity. Never imply an item was added unless addToCart succeeds.
 For orders, offer to place them yourself and say exactly: "Main aapka order khud confirm kar sakta hoon." Collect the guest customer's name, phone, city, full address, and requested items. Call quoteOrder to validate every item, current price and stock, then show that exact summary with line totals, delivery and final total before asking for confirmation. The server will show the verified quote to the customer. Call createOrder only after the customer's latest message explicitly says "CONFIRM ORDER" (or an unambiguous equivalent such as "haan, order confirm karein"), and reuse exactly the quoted items and customer details. Guest checkout is allowed; sign-in is not required. Never claim an order exists unless createOrder returns a successful order number. Orders use only live catalog prices and stock.
 For order status, call getOrderStatus and require both the exact order ID and the email used at checkout. Never reveal an order unless that email matches. For editing or cancelling an order, ask for the exact order ID and require the customer to be signed in to the account that owns it; an order ID alone is never authorization. Only pending orders can be edited/cancelled. Before cancellation, ask the owner to confirm. Guests must contact support to change or cancel their order.
 Keep replies concise. Ask a brief clarifying question when needed.`;
@@ -136,6 +148,23 @@ const tools = [
       },
     },
   },
+  {
+      type: "function",
+      function: {
+        name: "addToCart",
+        description: "Add a verified live product and quantity to the customer's shopping bag after checking current price and stock.",
+        parameters: {
+          type: "object",
+          properties: {
+            productId: { type: "string", pattern: "^[a-fA-F0-9]{24}$" },
+            quantity: { type: "integer", minimum: 1, maximum: 100 },
+            variantName: { type: "string", minLength: 1, maxLength: 100 },
+          },
+          required: ["productId", "quantity"],
+          additionalProperties: false,
+        },
+      },
+    },
   {
     type: "function",
     function: {
@@ -291,10 +320,17 @@ export async function POST(request: NextRequest) {
     ];
     const verifiedToolResults: string[] = [];
     const storedToolCalls: Array<{ name: string; arguments: unknown; result: unknown }> = [];
+    const cartActions: CartAction[] = [];
     let reply: string | null = null;
 
     for (let turn = 0; turn < 4; turn += 1) {
-      const completion = await fetchOpenRouter(apiKey, messages);
+      const completion = await fetchOpenRouter(
+        apiKey,
+        messages,
+        turn === 0 && isProductLookupRequest(input.message)
+          ? { type: "function", function: { name: "searchProducts" } }
+          : "auto",
+      );
       const assistantMessage = completion.choices?.[0]?.message;
       if (!assistantMessage) {
         console.error("OpenRouter returned no assistant message.");
@@ -340,6 +376,62 @@ export async function POST(request: NextRequest) {
         }
         const serializedResult = JSON.stringify(result);
         verifiedToolResults.push(serializedResult);
+        const cartResult = z.object({
+          success: z.literal(true),
+          addToCart: z.object({
+            productId: z.string(),
+            slug: z.string(),
+            name: z.string(),
+            image: z.string().optional(),
+            unitPrice: z.number(),
+            stock: z.number(),
+            quantity: z.number(),
+            variantName: z.string().optional(),
+          }),
+        }).safeParse(result);
+        if (call.function.name === "addToCart" && cartResult.success) {
+          cartActions.push(cartResult.data.addToCart);
+        }
+        if (call.function.name === "searchProducts" && isProductLookupRequest(input.message)) {
+          const products = (result as { products?: Array<{ id?: string }> } | null)?.products ?? [];
+          for (const product of products.slice(0, 1)) {
+            if (!product.id) continue;
+            let stockResult: unknown;
+            try {
+              stockResult = await executeTool(
+                "getStock",
+                { productId: product.id },
+                input.message,
+                authSession,
+                orderConfirmationPromptWasShown,
+                previousOrderQuote,
+              );
+            } catch (error) {
+              console.error("AI getStock lookup failed:", error);
+              stockResult = { error: "The product's current stock could not be verified." };
+            }
+            const serializedStock = JSON.stringify(stockResult);
+            verifiedToolResults.push(serializedStock);
+            storedToolCalls.push({
+              name: "getStock",
+              arguments: { productId: product.id },
+              result: stockResult,
+            });
+          }
+          if (isProductCountRequest(input.message)) {
+            const countResult = await executeTool(
+              "getProductCount",
+              {},
+              input.message,
+              authSession,
+              orderConfirmationPromptWasShown,
+              previousOrderQuote,
+            );
+            const serializedCount = JSON.stringify(countResult);
+            verifiedToolResults.push(serializedCount);
+            storedToolCalls.push({ name: "getProductCount", arguments: {}, result: countResult });
+          }
+        }
         const persistedArguments =
           call.function.name === "getOrderStatus" && typeof args === "object" && args !== null
             ? {
@@ -369,7 +461,11 @@ export async function POST(request: NextRequest) {
         "Our store focuses on non-food merchandise. I can help you find stationery, toys, gifts, kitchenware, beauty, home decor, or another supported category.";
     }
     const verifiedCatalogReply = buildVerifiedCatalogReply(input.message, verifiedToolResults);
-    if (verifiedCatalogReply) {
+    if (cartActions.length) {
+      reply = cartActions.map((item) =>
+        `🛍️ Added **${item.name}${item.variantName ? ` (${item.variantName})` : ""}** × ${item.quantity} to your bag. [View product](${`/product/${encodeURIComponent(item.slug)}`}) ✅`,
+      ).join("\n");
+    } else if (verifiedCatalogReply) {
       reply = verifiedCatalogReply;
     } else if (!answerUsesVerifiedFacts(reply, verifiedToolResults)) {
       reply = buildVerifiedFallbackReply(input.message, verifiedToolResults);
@@ -399,7 +495,7 @@ export async function POST(request: NextRequest) {
       { upsert: true, new: true, setDefaultsOnInsert: true },
     );
 
-    return NextResponse.json({ sessionId, reply });
+    return NextResponse.json({ sessionId, reply, ...(cartActions.length ? { cartActions } : {}) });
   } catch (error) {
     if (error instanceof OpenRouterError) {
       console.error("OpenRouter request failed:", error.message);
@@ -431,6 +527,7 @@ function extractTextContent(
 async function fetchOpenRouter(
   apiKey: string,
   messages: OpenRouterMessage[],
+  toolChoice: "auto" | { type: "function"; function: { name: string } } = "auto",
 ): Promise<OpenRouterResponse> {
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
@@ -444,7 +541,7 @@ async function fetchOpenRouter(
       model: process.env.OPENROUTER_MODEL ?? "openai/gpt-4o-mini",
       messages,
       tools,
-      tool_choice: "auto",
+      tool_choice: toolChoice,
       temperature: 0,
       max_tokens: 450,
     }),
@@ -507,12 +604,13 @@ async function executeTool(
       .select("name brand shortDescription description category price salePrice stock variants slug")
       .limit(6)
       .lean();
+    const candidates = products.length ? products : await findProductAlternatives(args.query.trim(), categoryIds);
     const categoryById = new Map(
       allowedCategories.map((category) => [category._id.toString(), category]),
     );
 
     return {
-      products: products
+      products: candidates
         .filter((product) => {
           const category = categoryById.get(product.category.toString());
           return category !== undefined && isAllowedNonFoodProduct({ ...product, category });
@@ -590,6 +688,54 @@ async function executeTool(
             quantity: variant.stock,
           }))
         : product.stock,
+    };
+  }
+
+  if (name === "addToCart") {
+    if (
+      typeof args.productId !== "string" ||
+      !isValidObjectId(args.productId) ||
+      typeof args.quantity !== "number" ||
+      !Number.isInteger(args.quantity) ||
+      args.quantity < 1 ||
+      args.quantity > 100 ||
+      (args.variantName !== undefined && typeof args.variantName !== "string")
+    ) {
+      return { error: "A valid product, quantity, and option are required." };
+    }
+    await connectToDatabase();
+    const product = await Product.findOne({ _id: new Types.ObjectId(args.productId), status: "active" })
+      .select("name slug price salePrice compareAtPrice stock variants images category")
+      .lean();
+    if (!product) return { error: "Product not found in the active catalog." };
+    const category = await Category.findById(product.category).select("name slug").lean();
+    if (!category || !isAllowedNonFoodProduct({ ...product, category })) {
+      return { error: "Product not found in the supported catalog." };
+    }
+    const variant = args.variantName
+      ? product.variants.find((entry: ProductSchema["variants"][number]) => entry.name === args.variantName)
+      : undefined;
+    if (args.variantName && !variant) return { error: "The selected product option is unavailable." };
+    if (!args.variantName && product.variants.length) return { error: "Choose an option before adding this product to the bag." };
+    const availableStock = variant?.stock ?? product.stock;
+    if (availableStock < args.quantity) return { error: `Only ${availableStock} unit(s) are currently available.` };
+    const basePrice = getProductSellingPrice(product);
+    const regularPrice = variant?.price ?? basePrice;
+    const unitPrice = variant?.salePrice != null && variant.salePrice < regularPrice
+      ? variant.salePrice
+      : regularPrice;
+    return {
+      success: true,
+      addToCart: {
+        productId: product._id.toString(),
+        slug: product.slug,
+        name: product.name,
+        image: variant?.image?.url ?? product.images[0]?.url,
+        unitPrice,
+        stock: availableStock,
+        quantity: args.quantity,
+        ...(variant ? { variantName: variant.name } : {}),
+      },
     };
   }
 
@@ -817,6 +963,12 @@ async function createAIOrder(
       unitCost: number | null;
       quantity: number;
     }[] = [];
+    const inventoryMovements: {
+      productId: Types.ObjectId;
+      variantName?: string;
+      quantityChanged: number;
+      remainingStock: number;
+    }[] = [];
 
     for (const item of Array.from(groupedItems.values())) {
       const product = productsById.get(item.productId);
@@ -828,6 +980,7 @@ async function createAIOrder(
 
       let unitPrice = getProductSellingPrice(product);
       let variantName: string | undefined;
+      let remainingStock: number;
       if (item.variantName) {
         const variant = product.variants.find((entry: ProductSchema["variants"][number]) => entry.name === item.variantName);
         if (!variant) throw new Error(`The selected option for "${product.name}" is unavailable.`);
@@ -848,6 +1001,7 @@ async function createAIOrder(
           },
         );
         if (updated.modifiedCount !== 1) throw new Error(`There is not enough stock for "${product.name}".`);
+        remainingStock = variant.stock - item.quantity;
         variantName = variant.name;
       } else {
         if (product.variants.length) throw new Error(`Choose an option for "${product.name}" before confirming.`);
@@ -857,7 +1011,14 @@ async function createAIOrder(
           { session },
         );
         if (updated.modifiedCount !== 1) throw new Error(`There is not enough stock for "${product.name}".`);
+        remainingStock = product.stock - item.quantity;
       }
+      inventoryMovements.push({
+        productId: product._id,
+        variantName,
+        quantityChanged: -item.quantity,
+        remainingStock,
+      });
       orderItems.push({
         productId: product._id,
         name: product.name,
@@ -894,6 +1055,15 @@ async function createAIOrder(
         orderSource: "AI Generated",
         status: "Pending",
       }],
+      { session },
+    );
+    await InventoryLog.create(
+      inventoryMovements.map((movement) => ({
+        ...movement,
+        reason: `AI order ${order.orderNumber}`,
+        source: "AI" as const,
+        referenceId: order._id,
+      })),
       { session },
     );
     return {
@@ -1001,6 +1171,15 @@ async function deleteAIOrder(
       if (!order) return null;
 
       for (const item of order.items) {
+        const product = await Product.findById(item.productId)
+          .select("stock variants")
+          .session(session)
+          .lean();
+        if (!product) throw new Error(`Could not restore inventory for ${item.name}.`);
+        const variant = item.variantName
+          ? product.variants.find((entry: ProductSchema["variants"][number]) => entry.name === item.variantName)
+          : undefined;
+        if (item.variantName && !variant) throw new Error(`Could not restore the selected option for ${item.name}.`);
         const quantityUpdate = item.variantName
           ? { $inc: { "variants.$[selected].stock": item.quantity } }
           : { $inc: { stock: item.quantity } };
@@ -1011,6 +1190,18 @@ async function deleteAIOrder(
         if (restored.matchedCount !== 1 || restored.modifiedCount !== 1) {
           throw new Error(`Could not restore inventory for ${item.name}.`);
         }
+        await InventoryLog.create(
+          [{
+            productId: item.productId,
+            variantName: item.variantName,
+            quantityChanged: item.quantity,
+            remainingStock: (variant?.stock ?? product.stock) + item.quantity,
+            reason: `AI order cancellation ${order.orderNumber}`,
+            source: "Cancellation",
+            referenceId: order._id,
+          }],
+          { session },
+        );
       }
 
       order.status = "Cancelled";
@@ -1264,20 +1455,62 @@ function buildVerifiedFallbackReply(message: string, results: string[]) {
   const productResult = parsedResults.find((result) => Array.isArray(result.products));
   if (productResult) {
     const products = productResult.products as Array<Record<string, unknown>>;
-    if (products.length === 0) return "I couldn't find a matching item in our live catalog. 🛍️ Tell me a category or product name and I'll search again.";
+    if (products.length === 0) return "I couldn't find an exact match in our live catalog. 🛍️ Tell me a category or product name and I'll search again.";
     return `Here are verified options from our catalog:\n${products.slice(0, 4).map((product) => {
       const stock = typeof product.stock === "number"
         ? ` · ${product.stock} in stock`
         : "";
       return `- [${String(product.name)}](${String(product.productUrl)}) · PKR ${Number(product.price).toLocaleString("en-PK")}${stock}`;
-    }).join("\n")}`;
+    }).join("\n")}${products.length ? "\n\nThese are the closest available options I found. ✅" : ""}`;
   }
   return "I couldn't verify the live store information just now. Please try again in a moment, and I'll check it for you. 🛍️";
 }
 
+function isProductLookupRequest(message: string) {
+  if (/^(?:hi|hello|hey|thanks|thank you|good morning|good evening)\b/i.test(message.trim())) return false;
+  if (/\b(?:order status|track (?:my )?order|delivery charge|shipping|return policy|refund|cancel (?:my )?order)\b/i.test(message)) return false;
+  const mentionsCatalog = /\b(?:product|products|item|items|price|stock|available|availability|buy|shop|find|search|looking for|need|want|show|see|recommend|category|brand|catalog|in stock|have)\b|dikha|dhoond|milay|qeemat|daam|maujood|stock mein/i.test(message);
+  return mentionsCatalog || AI_NON_FOOD_CATEGORIES.some((category) =>
+    category.split(/\s+/).some((term) => term.length > 3 && new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(message)),
+  );
+}
+
+function isProductCountRequest(message: string) {
+  return /\b(?:how many|number of|count|total number)\b|kitne|kitni/i.test(message);
+}
+
+async function findProductAlternatives(query: string, categoryIds: Types.ObjectId[]) {
+  const terms = query
+    .replace(/\b(?:show|find|search|recommend|available|availability|price|stock|have|product|products|item|items|please|the|for|in|a|an|do|you|have|what|is|are)\b/gi, " ")
+    .split(/\s+/)
+    .filter((term) => term.length >= 3)
+    .slice(0, 4);
+  const conditions = terms.flatMap((term) => {
+    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = { $regex: escaped, $options: "i" };
+    return [{ name: regex }, { brand: regex }, { shortDescription: regex }];
+  });
+  const matches = conditions.length
+    ? await Product.find({
+        status: "active",
+        category: { $in: categoryIds },
+        $or: conditions,
+      })
+        .select("name brand shortDescription category price salePrice stock variants slug")
+        .limit(6)
+        .lean()
+    : [];
+  if (matches.length) return matches;
+  return Product.find({ status: "active", category: { $in: categoryIds } })
+    .select("name brand shortDescription category price salePrice stock variants slug")
+    .sort({ createdAt: -1 })
+    .limit(4)
+    .lean();
+}
+
 function buildVerifiedCatalogReply(message: string, results: string[]) {
   const asksCount = /\b(?:how many|number of|count)\b|kitne|kitni/i.test(message);
-  const asksForItems = /\b(?:show|find|search|recommend|available|availability|price|stock|have)\b|dikha|dhoond|milay/i.test(message);
+  const asksForItems = isProductLookupRequest(message);
   if (!asksCount && !asksForItems) return null;
   const parsedResults = results.flatMap((result) => {
     try {

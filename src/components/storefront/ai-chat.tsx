@@ -5,9 +5,24 @@ import Link from "next/link";
 import { FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { ImagePlus, LoaderCircle, Maximize2, Mic, Minimize2, Send, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useCartStore } from "@/lib/cart-store";
 
 type ChatMessage = { role: "user" | "assistant"; content: string; image?: string };
-type ChatResponse = { sessionId?: string; reply?: string; error?: string };
+type ChatResponse = {
+  sessionId?: string;
+  reply?: string;
+  error?: string;
+  cartActions?: Array<{
+    productId: string;
+    slug: string;
+    name: string;
+    image?: string;
+    unitPrice: number;
+    stock: number;
+    quantity: number;
+    variantName?: string;
+  }>;
+};
 type RecognitionResult = { results: ArrayLike<ArrayLike<{ transcript: string }>> };
 type SpeechRecognitionInstance = {
   lang: string;
@@ -89,6 +104,7 @@ function renderMessageContent(content: string): ReactNode[] {
 }
 
 export function AiChat() {
+  const addToCart = useCartStore((state) => state.addToCart);
   const [open, setOpen] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([{ role: "assistant", content: greeting }]);
@@ -100,6 +116,7 @@ export function AiChat() {
   const sessionId = useRef<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const messageInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     sessionId.current = window.localStorage.getItem("idai-ai-session");
@@ -149,11 +166,13 @@ export function AiChat() {
         sessionId.current = result.sessionId;
         window.localStorage.setItem("idai-ai-session", result.sessionId);
       }
+      result.cartActions?.forEach((item) => addToCart(item));
       setMessages((current) => [...current, { role: "assistant", content: result.reply! }]);
     } catch (sendError) {
       setError(sendError instanceof Error ? sendError.message : "Unable to send your message.");
     } finally {
       setSending(false);
+      if (open) messageInputRef.current?.focus();
     }
   }
 
@@ -264,7 +283,7 @@ export function AiChat() {
         <button type="button" aria-label="Attach an image" onClick={() => fileRef.current?.click()} className="flex size-10 shrink-0 items-center justify-center rounded-full text-brand-olive transition hover:bg-brand-olive/10"><ImagePlus className="size-5" /></button>
         <button type="button" aria-label={listening ? "Listening" : "Speak your message"} onClick={startVoiceInput} disabled={listening} className={`flex size-10 shrink-0 items-center justify-center rounded-full transition ${listening ? "bg-brand-gold/20 text-brand-charcoal" : "text-brand-olive hover:bg-brand-olive/10"}`}><Mic className="size-5" /></button>
         <label className="sr-only" htmlFor="ai-chat-message">Message the shopping assistant</label>
-        <input id="ai-chat-message" value={input} onChange={(event) => setInput(event.target.value)} maxLength={1000} placeholder="Ask in English or Roman Urdu…" className="h-10 min-w-0 flex-1 rounded-full border border-input px-3 text-sm outline-none focus:border-brand-olive focus:ring-2 focus:ring-brand-olive/20 sm:px-4" disabled={sending} />
+        <input ref={messageInputRef} id="ai-chat-message" value={input} onChange={(event) => setInput(event.target.value)} maxLength={1000} placeholder="Ask in English or Roman Urdu…" className="h-10 min-w-0 flex-1 rounded-full border border-input px-3 text-sm outline-none focus:border-brand-olive focus:ring-2 focus:ring-brand-olive/20 sm:px-4" />
         <Button type="submit" size="icon" aria-label="Send message" disabled={sending || (!input.trim() && !image)} className="size-10 shrink-0 rounded-full bg-brand-olive hover:bg-brand-olive/90"><Send aria-hidden="true" className="size-4" /></Button>
       </form>
     </section>

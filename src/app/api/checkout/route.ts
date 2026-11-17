@@ -9,6 +9,7 @@ import { normalizeWhatsAppNumber } from "@/lib/whatsapp";
 import { connectToDatabase } from "@/lib/db";
 import Category from "@/models/Category";
 import Order from "@/models/Order";
+import InventoryLog from "@/models/InventoryLog";
 import Product, { type Product as ProductSchema } from "@/models/Product";
 import User from "@/models/User";
 
@@ -137,6 +138,12 @@ export async function POST(request: NextRequest) {
             unitCost: number | null;
             quantity: number;
           }[] = [];
+          const inventoryMovements: {
+            productId: Types.ObjectId;
+            variantName?: string;
+            quantityChanged: number;
+            remainingStock: number;
+          }[] = [];
 
           for (const item of groupedItems) {
             const product = productsById.get(item.productId);
@@ -156,6 +163,7 @@ export async function POST(request: NextRequest) {
                   : product.price;
             const hasVariants = product.variants.length > 0;
             let variantName: string | undefined;
+            let remainingStock: number;
 
             if (item.variantName) {
               const variant = product.variants.find(
@@ -191,6 +199,7 @@ export async function POST(request: NextRequest) {
               if (stockUpdate.modifiedCount !== 1) {
                 throw new StockConflictError(product.name);
               }
+              remainingStock = variant.stock - item.quantity;
             } else {
               if (hasVariants) {
                 throw new CheckoutError(`Choose an option for "${product.name}" before ordering.`, 400);
@@ -203,8 +212,15 @@ export async function POST(request: NextRequest) {
               if (stockUpdate.modifiedCount !== 1) {
                 throw new StockConflictError(product.name);
               }
+              remainingStock = product.stock - item.quantity;
             }
 
+            inventoryMovements.push({
+              productId: product._id,
+              variantName,
+              quantityChanged: -item.quantity,
+              remainingStock,
+            });
             snapshots.push({
               productId: product._id,
               name: product.name,
@@ -248,6 +264,15 @@ export async function POST(request: NextRequest) {
                 status: "Pending",
               },
             ],
+            { session },
+          );
+          await InventoryLog.create(
+            inventoryMovements.map((movement) => ({
+              ...movement,
+              reason: `Website order ${order.orderNumber}`,
+              source: "Website" as const,
+              referenceId: order._id,
+            })),
             { session },
           );
 

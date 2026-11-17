@@ -28,6 +28,7 @@ import {
   CardContent,
 } from "@/components/ui/card";
 import { ProductCard, RatingStars, type StorefrontProduct } from "@/components/storefront/product-card";
+import { optimizedImageUrl } from "@/lib/cloudinary-url";
 import {
   formatPKR,
   FREE_DELIVERY_THRESHOLD,
@@ -129,7 +130,7 @@ export function ProductDetails({ product }: { product: ProductDetailData }) {
                     aria-pressed={activeImage === index}
                     className={`relative size-20 shrink-0 overflow-hidden rounded-md border-2 ${activeImage === index ? "border-brand-olive" : "border-transparent"}`}
                   >
-                    <Image src={image.url} alt={image.alt || product.name} fill sizes="80px" className="object-cover" />
+                    <Image src={optimizedImageUrl(image.url)} alt={image.alt || product.name} fill sizes="80px" className="object-cover" />
                   </button>
                 ))}
               </div>
@@ -144,7 +145,7 @@ export function ProductDetails({ product }: { product: ProductDetailData }) {
                   >
                     {selectedImage ? (
                       <Image
-                        src={selectedImage.url}
+                        src={optimizedImageUrl(selectedImage.url)}
                         alt={selectedImage.alt || product.name}
                         fill
                         priority
@@ -164,7 +165,7 @@ export function ProductDetails({ product }: { product: ProductDetailData }) {
                   <div className="relative aspect-square max-h-[85vh] w-full overflow-hidden rounded-xl bg-white">
                     {selectedImage && (
                       <Image
-                        src={selectedImage.url}
+                        src={optimizedImageUrl(selectedImage.url)}
                         alt={selectedImage.alt || product.name}
                         fill
                         sizes="90vw"

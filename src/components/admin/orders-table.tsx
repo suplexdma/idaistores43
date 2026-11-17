@@ -16,13 +16,15 @@ import { RETURN_DELIVERY_LOSS_PKR } from "@/lib/order-return";
 
 const ORDER_STATUSES = ["Pending", "Confirmed", "Shipped", "Delivered", "Cancelled", "Returned"] as const;
 type OrderStatus = (typeof ORDER_STATUSES)[number];
-type OrderSource = "Website" | "WhatsApp" | "AI" | "AI Generated";
+type OrderSource = "Website" | "WhatsApp" | "AI" | "AI Generated" | "POS";
 type AdminOrder = {
   id: string;
   orderNumber: string;
   customer: string;
   phone: string;
   email: string;
+  customerNotes: string;
+  items: Array<{ name: string; quantity: number; variantName: string }>;
   itemCount: number;
   total: number;
   status: OrderStatus;
@@ -180,6 +182,7 @@ export function OrdersTable({ canEdit }: { canEdit: boolean }) {
               <option value="Website">Website</option>
               <option value="WhatsApp">WhatsApp</option>
               <option value="AI Generated">AI Generated</option>
+              <option value="POS">POS</option>
             </select>
           </label>
           <label className="text-sm">
@@ -219,8 +222,9 @@ export function OrdersTable({ canEdit }: { canEdit: boolean }) {
               <TableRow>
                 <TableHead>Order / Customer</TableHead>
                 <TableHead>Source</TableHead>
-                <TableHead>Items / Total</TableHead>
+                <TableHead>Products / Total</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Customer message</TableHead>
                 <TableHead>Internal notes</TableHead>
                 <TableHead><span className="sr-only">Actions</span></TableHead>
               </TableRow>
@@ -246,8 +250,16 @@ export function OrdersTable({ canEdit }: { canEdit: boolean }) {
                     )}
                   </TableCell>
                   <TableCell>{order.source === "AI" || order.source === "AI Generated" ? "AI Generated" : order.source}</TableCell>
-                  <TableCell className="whitespace-nowrap">
-                    {order.itemCount} item{order.itemCount === 1 ? "" : "s"}
+                  <TableCell className="min-w-52">
+                    <ul className="space-y-1.5">
+                      {order.items.map((item, index) => (
+                        <li key={`${item.name}-${item.variantName}-${index}`} className="text-sm">
+                          <span className="font-medium">{item.name}</span>
+                          {item.variantName && <span className="text-muted-foreground"> · {item.variantName}</span>}
+                          <span className="ml-1 text-muted-foreground">× {item.quantity}</span>
+                        </li>
+                      ))}
+                    </ul>
                     <p className="mt-1 font-semibold">PKR {order.total.toLocaleString("en-PK")}</p>
                   </TableCell>
                   <TableCell>
@@ -272,6 +284,13 @@ export function OrdersTable({ canEdit }: { canEdit: boolean }) {
                         </option>
                       ))}
                     </select>
+                  </TableCell>
+                  <TableCell className="min-w-52">
+                    {order.customerNotes ? (
+                      <p className="max-w-64 whitespace-pre-wrap break-words text-sm text-brand-charcoal">{order.customerNotes}</p>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">No message</span>
+                    )}
                   </TableCell>
                   <TableCell className="min-w-52">
                     <label className="sr-only" htmlFor={`notes-${order.id}`}>Internal notes for {order.orderNumber}</label>

@@ -6,11 +6,13 @@ import { productInputSchema } from "@/lib/product-validation";
 import { containsFoodRelatedText } from "@/lib/catalog-policy";
 import { productRichTextLength, sanitizeProductRichText } from "@/lib/product-rich-text";
 import Category from "@/models/Category";
-import Product from "@/models/Product";
+import Product, { type Product as ProductSchema } from "@/models/Product";
+import InventoryLog from "@/models/InventoryLog";
 import { isDuplicateKeyError, validationErrorResponse } from "@/lib/api-errors";
 
 export async function POST(request: NextRequest) {
-  if (!(await requireAdmin(["SuperAdmin", "Manager"]))) {
+  const admin = await requireAdmin(["SuperAdmin", "Manager"]);
+  if (!admin) {
     return NextResponse.json({ error: "Forbidden." }, { status: 403 });
   }
 
@@ -30,7 +32,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    await connectToDatabase();
+    const db = await connectToDatabase();
     const categoryIds = input.categories?.length
       ? input.categories
       : input.category
@@ -58,12 +60,46 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const product = await Product.create({
-      ...input,
-      category: categoryIds[0],
-      categories: categoryIds,
-      status: input.status ?? "active",
-    });
+    const session = await db.startSession();
+    let product: Awaited<ReturnType<typeof Product.create>>[number] | null = null;
+    try {
+      await session.withTransaction(async () => {
+        const [createdProduct] = await Product.create(
+          [{
+            ...input,
+            category: categoryIds[0],
+            categories: categoryIds,
+            status: input.status ?? "active",
+          }],
+          { session },
+        );
+        const movements = createdProduct.variants.length
+          ? createdProduct.variants.filter((variant: ProductSchema["variants"][number]) => variant.stock > 0).map((variant: ProductSchema["variants"][number]) => ({
+              productId: createdProduct._id,
+              variantName: variant.name,
+              quantityChanged: variant.stock,
+              remainingStock: variant.stock,
+              reason: "Initial product stock",
+              source: "Manual" as const,
+              adminId: admin.sub,
+            }))
+          : createdProduct.stock > 0
+            ? [{
+                productId: createdProduct._id,
+                quantityChanged: createdProduct.stock,
+                remainingStock: createdProduct.stock,
+                reason: "Initial product stock",
+                source: "Manual" as const,
+                adminId: admin.sub,
+              }]
+            : [];
+        if (movements.length) await InventoryLog.create(movements, { session });
+        product = createdProduct;
+      });
+    } finally {
+      await session.endSession();
+    }
+    if (!product) throw new Error("Product creation transaction completed without creating a product.");
     return NextResponse.json({ product }, { status: 201 });
   } catch (error) {
     if (isDuplicateKeyError(error)) {

@@ -6,10 +6,11 @@ import { isDuplicateKeyError, validationErrorResponse } from "@/lib/api-errors";
 import { connectToDatabase } from "@/lib/db";
 import { productInputBaseSchema } from "@/lib/product-validation";
 import Category from "@/models/Category";
-import Product from "@/models/Product";
+import Product, { type Product as ProductSchema } from "@/models/Product";
 import { containsFoodRelatedText } from "@/lib/catalog-policy";
 import { getAdminSession } from "@/lib/admin-session";
 import TrashEntry from "@/models/TrashEntry";
+import InventoryLog from "@/models/InventoryLog";
 import { productRichTextLength, sanitizeProductRichText } from "@/lib/product-rich-text";
 
 type RouteContext = { params: { id: string } };
@@ -64,7 +65,7 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
   try {
     await connectToDatabase();
     const currentProduct = await Product.findById(params.id)
-      .select("name brand shortDescription description price compareAtPrice category categories")
+      .select("name brand shortDescription description price compareAtPrice category categories stock variants")
       .lean();
     if (!currentProduct) {
       return NextResponse.json({ error: "Product not found." }, { status: 404 });
@@ -108,21 +109,85 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
       );
     }
 
-    const product = await Product.findByIdAndUpdate(
-      params.id,
-      {
-        $set: {
-          ...input,
-          category: categoryIds[0],
-          categories: categoryIds,
-        },
-      },
-      { new: true, runValidators: true },
-    ).select("-costPrice");
-    if (!product) {
-      return NextResponse.json({ error: "Product not found." }, { status: 404 });
+    const admin = await getAdminSession();
+    const db = await connectToDatabase();
+    const session = await db.startSession();
+    let updatedProduct: Awaited<ReturnType<typeof Product.findByIdAndUpdate>> = null;
+    try {
+      await session.withTransaction(async () => {
+        const stockState = await Product.findById(params.id)
+          .select("stock variants")
+          .session(session)
+          .lean();
+        if (!stockState) throw new Error("Product not found.");
+        const product = await Product.findByIdAndUpdate(
+          params.id,
+          {
+            $set: {
+              ...input,
+              category: categoryIds[0],
+              categories: categoryIds,
+            },
+          },
+          { new: true, runValidators: true, session },
+        ).select("-costPrice");
+        if (!product) {
+          throw new Error("Product not found.");
+        }
+        const stockChanges: Array<{
+          productId: typeof product._id;
+          variantName?: string;
+          quantityChanged: number;
+          remainingStock: number;
+          reason: string;
+          source: "Manual";
+          adminId?: string;
+        }> = [];
+        if (input.stock !== undefined && product.variants.length === 0) {
+          const change = product.stock - stockState.stock;
+          if (change) {
+            stockChanges.push({
+              productId: product._id,
+              quantityChanged: change,
+              remainingStock: product.stock,
+              reason: "Manual product stock adjustment",
+              source: "Manual",
+              adminId: admin?.sub,
+            });
+          }
+        }
+        if (input.variants !== undefined) {
+          const oldVariants = new Map<string, number>(stockState.variants.map((variant: ProductSchema["variants"][number]) => [variant.name, variant.stock]));
+          const newVariants = new Map<string, number>(product.variants.map((variant: ProductSchema["variants"][number]) => [variant.name, variant.stock]));
+          const variantNames = Array.from(new Set<string>([
+            ...Array.from(oldVariants.keys()),
+            ...Array.from(newVariants.keys()),
+          ]));
+          for (const variantName of variantNames) {
+            const previousStock = oldVariants.get(variantName) ?? 0;
+            const remainingStock = newVariants.get(variantName) ?? 0;
+            const quantityChanged = remainingStock - previousStock;
+            if (quantityChanged) {
+              stockChanges.push({
+                productId: product._id,
+                variantName,
+                quantityChanged,
+                remainingStock,
+                reason: "Manual product stock adjustment",
+                source: "Manual",
+                adminId: admin?.sub,
+              });
+            }
+          }
+        }
+        if (stockChanges.length) await InventoryLog.create(stockChanges, { session });
+        updatedProduct = product;
+      });
+    } finally {
+      await session.endSession();
     }
-    return NextResponse.json({ product });
+    if (!updatedProduct) return NextResponse.json({ error: "Product not found." }, { status: 404 });
+    return NextResponse.json({ product: updatedProduct });
   } catch (error) {
     if (isDuplicateKeyError(error)) {
       if (error.keyPattern?.barcode) {

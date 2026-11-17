@@ -316,20 +316,27 @@ export default async function AdminDashboardPage() {
 
   return (
     <div className="mx-auto max-w-[1400px] space-y-7">
-      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-olive">Overview</p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-tight text-brand-charcoal sm:text-[2rem]">Dashboard</h1>
-          <p className="mt-2 text-sm text-muted-foreground">A quick summary of your store activity.</p>
+      <div className="relative overflow-hidden rounded-[1.6rem] bg-gradient-to-br from-[#202720] via-[#293629] to-[#3c4b35] px-5 py-6 text-white shadow-xl shadow-brand-olive/10 sm:px-8 sm:py-8">
+        <div className="pointer-events-none absolute -right-10 -top-20 size-64 rounded-full border-[36px] border-white/[0.04]" />
+        <div className="relative flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-gold">Store intelligence</p>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-[2.15rem]">Dashboard</h1>
+            <p className="mt-2 text-sm text-white/65">Your sales, inventory, and operations at a glance.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/admin/inventory/pos" className="rounded-xl bg-brand-gold px-4 py-2.5 text-sm font-semibold text-brand-charcoal transition hover:bg-amber-300">Record a sale</Link>
+            <Link href="/admin/inventory/purchase-invoices" className="rounded-xl border border-white/15 bg-white/[0.06] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-white/[0.12]">Receive stock</Link>
+            <Link
+              href="/admin/products?stock=low"
+              className="inline-flex items-center gap-2 rounded-xl border border-red-200/20 bg-red-500/10 px-4 py-2.5 text-sm font-medium text-red-100 transition hover:bg-red-500/20"
+            >
+              <BellRing aria-hidden="true" className="size-4" />
+              Low stock
+              <span className="rounded-full bg-red-400/20 px-2 py-0.5 text-xs text-red-100">{aggregate.lowStockCount}</span>
+            </Link>
+          </div>
         </div>
-        <Link
-          href="/admin/products?stock=low"
-          className="inline-flex w-fit items-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2.5 text-sm font-medium text-red-700 shadow-sm transition hover:border-red-300 hover:bg-red-50"
-        >
-          <BellRing aria-hidden="true" className="size-4" />
-          Low-stock alerts
-          <span className="rounded-full bg-destructive px-2 py-0.5 text-xs text-white">{aggregate.lowStockCount}</span>
-        </Link>
       </div>
 
       <DashboardCommerceMetrics metrics={commerceMetrics} />

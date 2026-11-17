@@ -46,7 +46,7 @@ const orderSchema = new Schema(
     returnedAt: { type: Date, default: null, index: true },
     orderSource: {
       type: String,
-      enum: ["Website", "WhatsApp", "AI", "AI Generated"],
+      enum: ["Website", "WhatsApp", "AI", "AI Generated", "POS"],
       default: "Website",
       required: true,
       index: true,

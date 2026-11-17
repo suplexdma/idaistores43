@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin-session";
 import { connectToDatabase } from "@/lib/db";
+import { RETURN_DELIVERY_LOSS_PKR } from "@/lib/order-return";
 import Order from "@/models/Order";
 
 const PKT_OFFSET_MS = 5 * 60 * 60 * 1000;
@@ -85,6 +86,7 @@ export async function GET(request: NextRequest) {
         confirmed: number;
         returned: number;
         total: number;
+        profit: number;
       }>([
         { $match: { deletedAt: null, createdAt: { $gte: range.start, $lte: now } } },
         {
@@ -103,6 +105,42 @@ export async function GET(request: NextRequest) {
                   { $in: ["$status", ["Confirmed", "Shipped", "Delivered"]] },
                   "$subtotal",
                   0,
+                ],
+              },
+            },
+            profit: {
+              $sum: {
+                $cond: [
+                  { $in: ["$status", ["Confirmed", "Shipped", "Delivered"]] },
+                  {
+                    $reduce: {
+                      input: { $ifNull: ["$items", []] },
+                      initialValue: 0,
+                      in: {
+                        $add: [
+                          "$$value",
+                          {
+                            $multiply: [
+                              {
+                                $subtract: [
+                                  "$$this.unitPrice",
+                                  { $ifNull: ["$$this.unitCost", "$$this.unitPrice"] },
+                                ],
+                              },
+                              "$$this.quantity",
+                            ],
+                          },
+                        ],
+                      },
+                    },
+                  },
+                  {
+                    $cond: [
+                      { $eq: ["$status", "Returned"] },
+                      -RETURN_DELIVERY_LOSS_PKR,
+                      0,
+                    ],
+                  },
                 ],
               },
             },
@@ -134,6 +172,7 @@ export async function GET(request: NextRequest) {
         confirmed: bucket?.confirmed ?? 0,
         returned: bucket?.returned ?? 0,
         sales: bucket?.total ?? 0,
+        profit: bucket?.profit ?? 0,
       };
     });
     const returnPoints = dates.map((date) => {

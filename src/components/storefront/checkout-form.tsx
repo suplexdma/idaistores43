@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { useCartStore } from "@/lib/cart-store";
+import { optimizedImageUrl } from "@/lib/cloudinary-url";
 import { useLanguage } from "@/lib/language";
 import {
   formatPKR,
@@ -226,7 +227,7 @@ export function CheckoutForm({ prefill }: { prefill: CheckoutPrefill }) {
               {items.map((item) => (
                 <li key={`${item.productId}:${item.variantName ?? ""}`} className="flex gap-3">
                   <div className="relative size-16 shrink-0 overflow-hidden rounded-md bg-muted">
-                    {item.image && <Image src={item.image} alt={item.name} fill sizes="64px" className="object-cover" />}
+                    {item.image && <Image src={optimizedImageUrl(item.image)} alt={item.name} fill sizes="64px" className="object-cover" />}
                     <span className="absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full bg-brand-charcoal text-[10px] text-white">
                       {item.quantity}
                     </span>

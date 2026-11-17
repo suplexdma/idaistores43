@@ -76,6 +76,18 @@ assistant exclude food and grocery categories/items. The assistant supports
 English and Roman Urdu, browser voice input, and PNG/JPEG/WebP image attachments
 up to 5 MB.
 
+Inventory operations are available under `/admin/inventory`: supplier records
+at `/admin/inventory/suppliers`, receiving stock and updating product cost from
+purchase invoices at `/admin/inventory/purchase-invoices`, in-store checkout at
+`/admin/inventory/pos`, and the paginated stock movement ledger at
+`/admin/inventory/stock-ledger`. Website, AI, and POS orders all decrement the
+same product stock within their order transaction; purchase invoices increase
+that stock and write the corresponding audit movement. These operations require
+MongoDB transactions and therefore a replica-set deployment. The ledger records
+movements from this feature rollout onward; historical purchases and sales
+cannot be reconstructed from current stock totals. The admin dashboard includes
+daily, monthly, and yearly sales, profit, and order reports.
+
 ## Verify the database connection
 
 With MongoDB running and `MONGODB_URI` configured, run:
