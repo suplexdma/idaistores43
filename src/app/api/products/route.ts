@@ -51,6 +51,7 @@ export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const page = parsePositiveInteger(params.get("page"), 1);
   const limit = parsePositiveInteger(params.get("limit"), 20);
+  const includeTotal = params.get("includeTotal") !== "false";
   const sortValue = params.get("sort") ?? "newest";
   if (!page || !limit || limit > MAX_PAGE_SIZE) {
     return NextResponse.json(
@@ -154,7 +155,7 @@ export async function GET(request: NextRequest) {
       filter._id = { $in: ratedProducts.map(({ _id }) => _id) };
     }
 
-    const total = await Product.countDocuments(filter);
+    const total = includeTotal ? await Product.countDocuments(filter) : 0;
     const sort: Record<string, 1 | -1> =
       sortValue === "price-asc"
         ? { effectivePrice: 1, _id: 1 }
@@ -265,7 +266,9 @@ export async function GET(request: NextRequest) {
       rating: ratingByProduct.get(String(product._id)) ?? { averageRating: 0, reviewCount: 0 },
     }));
 
-    return productListResponse(productsWithRatings, total, page, limit);
+    return includeTotal
+      ? productListResponse(productsWithRatings, total, page, limit)
+      : NextResponse.json({ products: productsWithRatings });
   } catch (error) {
     console.error("Product listing failed:", error);
     return NextResponse.json({ error: "Unable to load products." }, { status: 500 });

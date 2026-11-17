@@ -17,7 +17,7 @@ import {
 import { formatPKR } from "@/components/storefront/cart-drawer";
 import { useCartStore } from "@/lib/cart-store";
 import { useWishlistStore } from "@/lib/wishlist-store";
-import { optimizedImageUrl } from "@/lib/cloudinary-url";
+import { cloudinaryImageLoader } from "@/lib/cloudinary-url";
 
 export type StorefrontProduct = {
   _id: string;
@@ -100,7 +100,8 @@ export function ProductCard({ product }: ProductCardProps) {
         <Link href={`/product/${product.slug}`} aria-label={`View ${product.name}`}>
           {image ? (
             <Image
-              src={optimizedImageUrl(image.url)}
+              src={image.url}
+              loader={cloudinaryImageLoader}
               alt={image.alt || product.name}
               fill
               sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
@@ -148,7 +149,8 @@ export function ProductCard({ product }: ProductCardProps) {
               <div className="relative aspect-square overflow-hidden rounded-lg bg-muted">
                 {image && (
                   <Image
-                    src={optimizedImageUrl(image.url)}
+                    src={image.url}
+                    loader={cloudinaryImageLoader}
                     alt={image.alt || product.name}
                     fill
                     sizes="(max-width: 640px) 90vw, 40vw"

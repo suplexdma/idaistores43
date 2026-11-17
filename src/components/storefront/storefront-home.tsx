@@ -85,8 +85,8 @@ export function StorefrontHome() {
     async function loadContent() {
       const [categoryResult, productResult, trendingResult] = await Promise.allSettled([
         fetch("/api/categories", { signal: controller.signal }),
-        fetch("/api/products?sort=newest&limit=16", { signal: controller.signal }),
-        fetch("/api/products?sort=trending&limit=8", { signal: controller.signal }),
+        fetch("/api/products?sort=newest&limit=16&includeTotal=false", { signal: controller.signal }),
+        fetch("/api/products?sort=trending&limit=8&includeTotal=false", { signal: controller.signal }),
       ]);
 
       if (controller.signal.aborted) return;

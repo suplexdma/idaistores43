@@ -1,5 +1,7 @@
-export function optimizedImageUrl(url: string): string {
+import type { ImageLoaderProps } from "next/image";
+
+export function cloudinaryImageLoader({ src, width }: ImageLoaderProps): string {
   const uploadPath = "/image/upload/";
-  if (!url.startsWith("https://res.cloudinary.com/") || !url.includes(uploadPath)) return url;
-  return url.replace(uploadPath, `${uploadPath}f_auto,q_auto/`);
+  if (!src.startsWith("https://res.cloudinary.com/") || !src.includes(uploadPath)) return src;
+  return src.replace(uploadPath, `${uploadPath}f_auto,q_auto,w_${width},c_limit/`);
 }

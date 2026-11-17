@@ -28,7 +28,7 @@ import {
   CardContent,
 } from "@/components/ui/card";
 import { ProductCard, RatingStars, type StorefrontProduct } from "@/components/storefront/product-card";
-import { optimizedImageUrl } from "@/lib/cloudinary-url";
+import { cloudinaryImageLoader } from "@/lib/cloudinary-url";
 import {
   formatPKR,
   FREE_DELIVERY_THRESHOLD,
@@ -130,7 +130,7 @@ export function ProductDetails({ product }: { product: ProductDetailData }) {
                     aria-pressed={activeImage === index}
                     className={`relative size-20 shrink-0 overflow-hidden rounded-md border-2 ${activeImage === index ? "border-brand-olive" : "border-transparent"}`}
                   >
-                    <Image src={optimizedImageUrl(image.url)} alt={image.alt || product.name} fill sizes="80px" className="object-cover" />
+                    <Image src={image.url} loader={cloudinaryImageLoader} alt={image.alt || product.name} fill sizes="80px" className="object-cover" />
                   </button>
                 ))}
               </div>
@@ -145,7 +145,8 @@ export function ProductDetails({ product }: { product: ProductDetailData }) {
                   >
                     {selectedImage ? (
                       <Image
-                        src={optimizedImageUrl(selectedImage.url)}
+                        src={selectedImage.url}
+                        loader={cloudinaryImageLoader}
                         alt={selectedImage.alt || product.name}
                         fill
                         priority
@@ -165,7 +166,8 @@ export function ProductDetails({ product }: { product: ProductDetailData }) {
                   <div className="relative aspect-square max-h-[85vh] w-full overflow-hidden rounded-xl bg-white">
                     {selectedImage && (
                       <Image
-                        src={optimizedImageUrl(selectedImage.url)}
+                        src={selectedImage.url}
+                        loader={cloudinaryImageLoader}
                         alt={selectedImage.alt || product.name}
                         fill
                         sizes="90vw"

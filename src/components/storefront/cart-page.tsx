@@ -11,7 +11,7 @@ import {
   STANDARD_DELIVERY_CHARGE,
 } from "@/components/storefront/cart-drawer";
 import { getCartItemKey, useCartStore } from "@/lib/cart-store";
-import { optimizedImageUrl } from "@/lib/cloudinary-url";
+import { cloudinaryImageLoader } from "@/lib/cloudinary-url";
 
 export function CartPage() {
   const items = useCartStore((state) => state.items);
@@ -63,7 +63,8 @@ export function CartPage() {
                     <Link href={`/product/${item.slug}`} className="relative size-24 shrink-0 overflow-hidden rounded-lg bg-muted sm:size-32">
                       {item.image && (
                         <Image
-                          src={optimizedImageUrl(item.image)}
+                          src={item.image}
+                          loader={cloudinaryImageLoader}
                           alt={item.name}
                           fill
                           sizes="128px"

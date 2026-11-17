@@ -21,6 +21,47 @@ body {
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }
 
+.admin-sidebar-scroll {
+  scrollbar-color: var(--brand-olive) #20231f;
+  scrollbar-width: thin;
+  scroll-behavior: smooth;
+  transition: scrollbar-color 180ms ease;
+}
+
+.admin-sidebar-scroll:hover {
+  scrollbar-color: var(--brand-gold) #20231f;
+}
+
+.admin-sidebar-scroll::-webkit-scrollbar {
+  width: 7px;
+}
+
+.admin-sidebar-scroll::-webkit-scrollbar-track {
+  border-radius: 9999px;
+  background: #20231f;
+}
+
+.admin-sidebar-scroll::-webkit-scrollbar-thumb {
+  border: 1px solid #20231f;
+  border-radius: 9999px;
+  background: linear-gradient(180deg, var(--brand-gold), var(--brand-olive));
+  transition: background 180ms ease, box-shadow 180ms ease;
+}
+
+.admin-sidebar-scroll:hover::-webkit-scrollbar-thumb {
+  background: var(--brand-gold);
+  animation: sidebar-scroll-glow 1.6s ease-in-out infinite alternate;
+}
+
+@keyframes sidebar-scroll-glow {
+  from {
+    box-shadow: 0 0 2px rgb(217 166 59 / 25%);
+  }
+  to {
+    box-shadow: 0 0 8px rgb(217 166 59 / 70%);
+  }
+}
+
 .tiptap p.is-editor-empty:first-child::before {
   color: hsl(var(--muted-foreground));
   content: attr(data-placeholder);

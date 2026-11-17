@@ -35,10 +35,10 @@ export default function ContactPage() {
             <ContactActions />
           </section>
           <div className="overflow-hidden rounded-2xl border border-black/5 bg-white shadow-sm">
-            <iframe title="Map showing Kundan Sian, Daska, Pakistan" src="https://maps.google.com/maps?q=Kundan%20Sian%2C%20Daska%2C%20Pakistan&t=&z=13&ie=UTF8&iwloc=&output=embed" loading="lazy" referrerPolicy="no-referrer-when-downgrade" className="h-64 w-full border-0" />
+            <iframe title="Map showing IDAI Stores 43 in Kundan Sian, Daska" src="https://maps.google.com/maps?q=32.32912155%2C74.3528708&t=&z=17&ie=UTF8&iwloc=&output=embed" loading="lazy" referrerPolicy="no-referrer-when-downgrade" className="h-64 w-full border-0" />
             <div className="flex items-center justify-between gap-3 px-4 py-3 text-xs">
-              <span className="text-muted-foreground">Kundan Sian, Daska</span>
-              <Link href="https://maps.google.com/?q=Kundan+Sian,+Daska,+Pakistan" target="_blank" rel="noreferrer" className="font-semibold text-brand-olive hover:underline">Open map</Link>
+              <span className="text-muted-foreground">IDAI Stores 43 · Kundan Sian, Daska</span>
+              <Link href="https://www.google.com/maps/search/?api=1&query=32.32912155%2C74.3528708" target="_blank" rel="noreferrer" className="font-semibold text-brand-olive hover:underline">Open map</Link>
             </div>
           </div>
         </div>

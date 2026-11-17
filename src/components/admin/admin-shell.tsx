@@ -104,32 +104,34 @@ export function AdminShell({ children, name, email, accessLevel }: AdminShellPro
           )}
         </Link>
 
-        <div className="mb-3 mt-9 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-white/35">
-          Workspace
+        <div className="admin-sidebar-scroll min-h-0 flex-1 overflow-y-auto overscroll-y-contain">
+          <div className="mb-3 mt-9 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-white/35">
+            Workspace
+          </div>
+          <nav aria-label="Admin navigation" className="space-y-1">
+            {visibleNavigation.map(({ href, label, icon: Icon }) => {
+              const active = href === "/admin" ? pathname === href : pathname.startsWith(href);
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  aria-current={active ? "page" : undefined}
+                  className={`group flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] font-medium transition-colors ${
+                    active
+                      ? "bg-brand-olive text-white shadow-md shadow-black/10"
+                      : "text-white/65 hover:bg-white/[0.07] hover:text-white"
+                  }`}
+                >
+                  <Icon aria-hidden="true" className={`size-[18px] ${active ? "text-white" : "text-white/50 group-hover:text-brand-gold"}`} />
+                  <span className="flex-1">{label}</span>
+                  {active && <span className="size-1.5 rounded-full bg-brand-gold" />}
+                </Link>
+              );
+            })}
+          </nav>
         </div>
-        <nav aria-label="Admin navigation" className="space-y-1">
-          {visibleNavigation.map(({ href, label, icon: Icon }) => {
-            const active = href === "/admin" ? pathname === href : pathname.startsWith(href);
-            return (
-              <Link
-                key={href}
-                href={href}
-                aria-current={active ? "page" : undefined}
-                className={`group flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] font-medium transition-colors ${
-                  active
-                    ? "bg-brand-olive text-white shadow-md shadow-black/10"
-                    : "text-white/65 hover:bg-white/[0.07] hover:text-white"
-                }`}
-              >
-                <Icon aria-hidden="true" className={`size-[18px] ${active ? "text-white" : "text-white/50 group-hover:text-brand-gold"}`} />
-                <span className="flex-1">{label}</span>
-                {active && <span className="size-1.5 rounded-full bg-brand-gold" />}
-              </Link>
-            );
-          })}
-        </nav>
 
-        <div className="mt-auto border-t border-white/10 pt-5">
+        <div className="mt-4 shrink-0 border-t border-white/10 pt-5">
           <div className="flex items-center gap-3 rounded-xl bg-white/[0.06] p-3">
             <span className="grid size-9 shrink-0 place-items-center rounded-full bg-brand-gold/15 text-sm font-semibold text-brand-gold">
               {(name.trim()[0] || email[0] || "A").toUpperCase()}
