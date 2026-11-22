@@ -5,14 +5,10 @@ import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 const ranges = [
-  { value: "year", label: "Yearly" },
-  { value: "6months", label: "6 Months" },
-  { value: "3months", label: "3 Months" },
-  { value: "month", label: "Monthly" },
-  { value: "7days", label: "7 Days" },
-  { value: "day", label: "Daily" },
-  { value: "hours", label: "Hours" },
-  { value: "minutes", label: "Minutes" },
+  { value: "this-month", label: "This Month" },
+  { value: "last-month", label: "Last Month" },
+  { value: "yearly", label: "Yearly" },
+  { value: "custom", label: "Custom Date Range" },
 ] as const;
 
 type Range = (typeof ranges)[number]["value"];
@@ -126,7 +122,10 @@ function TimeSeriesChart({
 }
 
 export function OrdersGraph() {
-  const [range, setRange] = useState<Range>("7days");
+  const [range, setRange] = useState<Range>("this-month");
+  const [year, setYear] = useState(String(new Date().getFullYear()));
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
   const [metric, setMetric] = useState<"sales" | "profit" | "orders">("sales");
   const [points, setPoints] = useState<Point[]>([]);
   const [returnPoints, setReturnPoints] = useState<ReturnPoint[]>([]);
@@ -139,7 +138,10 @@ export function OrdersGraph() {
       setLoading(true);
       setError("");
       try {
-        const response = await fetch(`/api/admin/analytics/orders?range=${range}`, {
+        const params = new URLSearchParams({ range });
+        if (range === "yearly") params.set("year", year);
+        if (range === "custom") { params.set("start", start); params.set("end", end); }
+        const response = await fetch(`/api/admin/analytics/orders?${params.toString()}`, {
           signal: controller.signal,
         });
         const data = (await response.json()) as {
@@ -159,7 +161,7 @@ export function OrdersGraph() {
     }
     void loadGraph();
     return () => controller.abort();
-  }, [range]);
+  }, [range, year, start, end]);
 
   const formatRangeValue = (value: number) => value.toLocaleString("en-PK");
   const totalOrders = points.reduce((sum, point) => sum + point.orders, 0);
@@ -198,6 +200,17 @@ export function OrdersGraph() {
               </button>
             ))}
           </div>
+          {range === "yearly" && (
+            <select aria-label="Year" value={year} onChange={(event) => setYear(event.target.value)} className="h-9 rounded-md border border-input bg-background px-3 text-xs">
+              {Array.from({ length: 6 }, (_, index) => String(new Date().getFullYear() - index)).map((value) => <option key={value} value={value}>{value}</option>)}
+            </select>
+          )}
+          {range === "custom" && (
+            <div className="flex gap-2">
+              <input aria-label="Start date" type="date" value={start} onChange={(event) => setStart(event.target.value)} className="h-9 rounded-md border border-input bg-background px-2 text-xs" />
+              <input aria-label="End date" type="date" value={end} onChange={(event) => setEnd(event.target.value)} className="h-9 rounded-md border border-input bg-background px-2 text-xs" />
+            </div>
+          )}
           <div className="flex gap-1" role="group" aria-label="Sales report metric">
             {(["sales", "profit", "orders"] as const).map((value) => (
               <button key={value} type="button" onClick={() => setMetric(value)} aria-pressed={metric === value} className={`rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition ${metric === value ? "bg-brand-olive text-white" : "text-muted-foreground hover:bg-muted"}`}>

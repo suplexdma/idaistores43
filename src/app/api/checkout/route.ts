@@ -254,14 +254,27 @@ export async function POST(request: NextRequest) {
                   city: input.customer.city,
                   notes: input.customer.notes,
                 },
+                shippingAddress: {
+                  name: input.customer.name,
+                  phone: input.customer.phone,
+                  email: customerEmail,
+                  address: input.customer.address,
+                  area: input.customer.area,
+                  city: input.customer.city,
+                },
                 userId,
                 items: snapshots,
                 subtotal,
                 deliveryCharge,
+                deliveryCharges: 0,
                 total,
+                paymentStatus: "Pending",
+                amountReceived: 0,
+                balanceAmount: total,
                 paymentMethod: "COD",
                 orderSource: input.source,
                 status: "Pending",
+                statusHistory: [{ status: "Pending", timestamp: new Date() }],
               },
             ],
             { session },
@@ -273,7 +286,7 @@ export async function POST(request: NextRequest) {
               source: "Website" as const,
               referenceId: order._id,
             })),
-            { session },
+            { session, ordered: true },
           );
 
           if (userId) {
@@ -383,7 +396,8 @@ export async function POST(request: NextRequest) {
 function groupCartItems(items: OrderLineInput[]) {
   const grouped = new Map<string, OrderLineInput>();
   for (const item of items) {
-    const key = `${item.productId}:${item.variantName ?? ""}`;
+    const productId = item.productId.toLowerCase();
+    const key = `${productId}:${item.variantName ?? ""}`;
     const existing = grouped.get(key);
     if (existing) {
       const quantity = existing.quantity + item.quantity;
@@ -392,7 +406,7 @@ function groupCartItems(items: OrderLineInput[]) {
       }
       existing.quantity = quantity;
     } else {
-      grouped.set(key, { ...item });
+      grouped.set(key, { ...item, productId });
     }
   }
   return Array.from(grouped.values());

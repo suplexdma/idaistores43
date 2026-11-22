@@ -19,9 +19,10 @@ import Product, { type Product as ProductSchema } from "@/models/Product";
 import User from "@/models/User";
 
 export const runtime = "nodejs";
+const MAX_CHAT_MESSAGE_LENGTH = 10_000;
 
 const requestSchema = z.object({
-  message: z.string().trim().min(1).max(1000),
+  message: z.string().trim().min(1).max(MAX_CHAT_MESSAGE_LENGTH),
   sessionId: z.string().uuid().optional(),
   imageDataUrl: z
     .string()
@@ -69,8 +70,9 @@ Never invent product names, prices, availability, or stock. For every product, i
 Understand and reply in English or Roman Urdu, matching the customer's language. For image attachments, describe only visible non-food items; do not identify food as a store product or guess prices or availability.
 Cash on Delivery is the only payment method. Delivery is PKR 300 below PKR 2,000 and free at or above PKR 2,000.
 When a customer asks to add an item to their bag, verify it with searchProducts and getStock, then call addToCart with the exact product, option, and requested quantity. Never imply an item was added unless addToCart succeeds.
-For orders, offer to place them yourself and say exactly: "Main aapka order khud confirm kar sakta hoon." Collect the guest customer's name, phone, city, full address, and requested items. Call quoteOrder to validate every item, current price and stock, then show that exact summary with line totals, delivery and final total before asking for confirmation. The server will show the verified quote to the customer. Call createOrder only after the customer's latest message explicitly says "CONFIRM ORDER" (or an unambiguous equivalent such as "haan, order confirm karein"), and reuse exactly the quoted items and customer details. Guest checkout is allowed; sign-in is not required. Never claim an order exists unless createOrder returns a successful order number. Orders use only live catalog prices and stock.
-For order status, call getOrderStatus and require both the exact order ID and the email used at checkout. Never reveal an order unless that email matches. For editing or cancelling an order, ask for the exact order ID and require the customer to be signed in to the account that owns it; an order ID alone is never authorization. Only pending orders can be edited/cancelled. Before cancellation, ask the owner to confirm. Guests must contact support to change or cancel their order.
+When the customer only asks to add something to their bag, use addToCart. If they ask you to place an order, do not stop after adding products to the bag: collect the guest customer's name, phone, city, full address, and requested items, then use the order workflow below.
+For orders, offer to place them yourself and say exactly: "Main aapka order khud confirm kar sakta hoon." Call quoteOrder to validate every item, current price and stock, then show that exact summary with line totals, delivery and final total before asking for confirmation. The server will show the verified quote to the customer. Call createOrder only after the customer's latest message explicitly confirms that quoted order, and reuse exactly the quoted items and customer details. Guest checkout is allowed; sign-in is not required. Never claim an order exists unless createOrder returns a successful order number. Orders use only live catalog prices and stock.
+For order status, a signed-in customer may use the exact order ID and the account that owns it; a guest must provide both the exact order ID and checkout email. Never reveal an order unless ownership or guest email matches. For editing or cancelling/removing an order, ask for the exact order ID and require the customer to be signed in to the account that owns it; an order ID alone is never authorization. Only pending orders can be edited/cancelled. Before cancellation, ask the owner to confirm. Guests must contact support to change or cancel their order.
 Keep replies concise. Ask a brief clarifying question when needed.`;
 
 const aiOrderToolParameters = {
@@ -169,14 +171,14 @@ const tools = [
     type: "function",
     function: {
       name: "getOrderStatus",
-      description: "Look up order status only after verifying the email used for that order.",
+      description: "Look up order status using the signed-in owner's account, or a guest order's exact checkout email.",
       parameters: {
         type: "object",
         properties: {
           orderId: { type: "string", pattern: "^IDAI-[0-9]{6}$" },
           userEmail: { type: "string", format: "email", maxLength: 254 },
         },
-        required: ["orderId", "userEmail"],
+        required: ["orderId"],
         additionalProperties: false,
       },
     },
@@ -323,7 +325,7 @@ export async function POST(request: NextRequest) {
     const cartActions: CartAction[] = [];
     let reply: string | null = null;
 
-    for (let turn = 0; turn < 4; turn += 1) {
+    for (let turn = 0; turn < 8; turn += 1) {
       const completion = await fetchOpenRouter(
         apiKey,
         messages,
@@ -334,10 +336,7 @@ export async function POST(request: NextRequest) {
       const assistantMessage = completion.choices?.[0]?.message;
       if (!assistantMessage) {
         console.error("OpenRouter returned no assistant message.");
-        return NextResponse.json(
-          { error: "The shopping assistant could not complete that request." },
-          { status: 502 },
-        );
+        break;
       }
 
       const toolCalls = assistantMessage.tool_calls ?? [];
@@ -449,26 +448,43 @@ export async function POST(request: NextRequest) {
     }
 
     const currentOrderQuote = getMostRecentOrderQuote(storedToolCalls);
-    if (currentOrderQuote) reply = renderOrderQuote(currentOrderQuote);
-    if (!reply) {
-      return NextResponse.json(
-        { error: "The shopping assistant could not complete that request. Please try again." },
-        { status: 502 },
-      );
-    }
-    if (containsFoodRelatedText(reply)) {
-      reply =
-        "Our store focuses on non-food merchandise. I can help you find stationery, toys, gifts, kitchenware, beauty, home decor, or another supported category.";
-    }
+    const completedAction = getSuccessfulOrderAction(verifiedToolResults);
+    const orderActionError = getLatestOrderActionError(storedToolCalls);
+    const confirmingQuotedOrder =
+      Boolean(previousOrderQuote) &&
+      orderConfirmationPromptWasShown &&
+      isExplicitOrderConfirmation(input.message);
     const verifiedCatalogReply = buildVerifiedCatalogReply(input.message, verifiedToolResults);
-    if (cartActions.length) {
-      reply = cartActions.map((item) =>
-        `🛍️ Added **${item.name}${item.variantName ? ` (${item.variantName})` : ""}** × ${item.quantity} to your bag. [View product](${`/product/${encodeURIComponent(item.slug)}`}) ✅`,
-      ).join("\n");
-    } else if (verifiedCatalogReply) {
-      reply = verifiedCatalogReply;
-    } else if (!answerUsesVerifiedFacts(reply, verifiedToolResults)) {
-      reply = buildVerifiedFallbackReply(input.message, verifiedToolResults);
+    if (completedAction) {
+      reply = completedAction;
+    } else if (orderActionError) {
+      const failedAction =
+        orderActionError.name === "createOrder"
+          ? "Your order has not been placed"
+          : "No order changes were made";
+      reply = `${failedAction}: ${orderActionError.message}`;
+    } else if (confirmingQuotedOrder) {
+      reply = "I couldn't verify that the order was placed, so it has not been placed. Please try confirming again.";
+    } else if (currentOrderQuote) {
+      reply = renderOrderQuote(currentOrderQuote);
+    } else if (cartActions.length) {
+      reply = renderCartActions(cartActions);
+    } else {
+      if (!reply) {
+        const toolError = getLatestToolError(verifiedToolResults);
+        reply = toolError
+          ? `I couldn't complete that step: ${toolError}`
+          : "I couldn't finish that request just now. Your order has not been placed unless I gave you an order number. Please try again.";
+      }
+      if (containsFoodRelatedText(reply)) {
+        reply =
+          "Our store focuses on non-food merchandise. I can help you find stationery, toys, gifts, kitchenware, beauty, home decor, or another supported category.";
+      }
+      if (verifiedCatalogReply) {
+        reply = verifiedCatalogReply;
+      } else if (!answerUsesVerifiedFacts(reply, verifiedToolResults)) {
+        reply = buildVerifiedFallbackReply(input.message, verifiedToolResults);
+      }
     }
 
     await AIConversation.findOneAndUpdate(
@@ -543,7 +559,7 @@ async function fetchOpenRouter(
       tools,
       tool_choice: toolChoice,
       temperature: 0,
-      max_tokens: 450,
+      max_tokens: 1200,
     }),
     cache: "no-store",
   });
@@ -583,7 +599,12 @@ async function executeTool(
       .map((category) => category._id);
     if (categoryIds.length === 0) return { products: [] };
 
-    const products = await Product.find({
+    const query = args.query.trim();
+    const exactProducts = await Product.find({
+      status: "active",
+      $or: [{ barcode: query }, { sku: query.toUpperCase() }],
+    }).select("name brand shortDescription description category price salePrice stock variants slug sku barcode").limit(6).lean();
+    const products = exactProducts.length ? exactProducts : await Product.find({
       status: "active",
       $and: [
         {
@@ -593,7 +614,11 @@ async function executeTool(
           ],
         },
       ],
-      $text: { $search: args.query.trim() },
+      $or: [
+        { name: { $regex: query, $options: "i" } },
+        { brand: { $regex: query, $options: "i" } },
+        { shortDescription: { $regex: query, $options: "i" } },
+      ],
       $nor: [
         { name: { $regex: FOOD_RELATED_REGEX } },
         { brand: { $regex: FOOD_RELATED_REGEX } },
@@ -740,18 +765,22 @@ async function executeTool(
   }
 
   if (name === "getOrderStatus") {
-    if (
-      typeof args.orderId !== "string" ||
-      !/^IDAI-\d{6}$/.test(args.orderId) ||
-      typeof args.userEmail !== "string" ||
-      !z.string().email().safeParse(args.userEmail).success
-    ) {
-      return { error: "Both a valid order ID and checkout email are required." };
+    if (typeof args.orderId !== "string" || !/^IDAI-\d{6}$/.test(args.orderId)) {
+      return { error: "A valid order ID is required." };
+    }
+    const customerId = authSession?.user?.id;
+    const signedInCustomer = customerId && Types.ObjectId.isValid(customerId);
+    const userEmail = typeof args.userEmail === "string" ? args.userEmail.trim().toLowerCase() : "";
+    if (!signedInCustomer && !z.string().email().safeParse(userEmail).success) {
+      return { error: "Sign in to the account that placed the order, or provide the checkout email for a guest order." };
     }
     await connectToDatabase();
     const order = await Order.findOne({
       orderNumber: args.orderId,
-      "customerDetails.email": args.userEmail.trim().toLowerCase(),
+      deletedAt: null,
+      ...(signedInCustomer
+        ? { userId: new Types.ObjectId(customerId) }
+        : { "customerDetails.email": userEmail }),
     })
       .select("orderNumber status createdAt")
       .lean();
@@ -770,13 +799,18 @@ async function executeTool(
   }
 
   if (name === "createOrder") {
-    return createAIOrder(
-      rawArguments,
-      latestUserMessage,
-      authSession,
-      orderConfirmationPromptWasShown,
-      orderQuote,
-    );
+    try {
+      return await createAIOrder(
+        rawArguments,
+        latestUserMessage,
+        authSession,
+        orderConfirmationPromptWasShown,
+        orderQuote,
+      );
+    } catch (error) {
+      if (error instanceof AIOrderValidationError) return { error: error.message };
+      throw error;
+    }
   }
 
   if (name === "editOrder") {
@@ -893,6 +927,9 @@ async function quoteAIOrder(rawArguments: unknown) {
     subtotal,
     deliveryCharge,
     total: subtotal + deliveryCharge,
+    paymentStatus: "Pending",
+    amountReceived: 0,
+    balanceAmount: subtotal + deliveryCharge,
   };
 }
 
@@ -906,7 +943,7 @@ async function createAIOrder(
   if (!orderConfirmationPromptWasShown) {
     return { error: "First present a complete order summary in the chat and ask the customer to reply CONFIRM ORDER." };
   }
-  if (!/^\s*(?:confirm order|yes,?\s*(?:please\s*)?place (?:the )?order|place my order|haan,?\s*order confirm karein|haan,?\s*order kar dein)\s*[.!]*$/i.test(latestUserMessage)) {
+  if (!isExplicitOrderConfirmation(latestUserMessage)) {
     return { error: "Show the complete live order summary and ask the customer to reply exactly “CONFIRM ORDER” before placing it." };
   }
   const parsed = aiOrderSchema.safeParse(rawArguments);
@@ -928,17 +965,18 @@ async function createAIOrder(
     const user = customerId
       ? await User.findById(customerId).select("_id email").session(session).lean()
       : null;
-    if (customerId && !user) throw new Error("The signed-in customer account could not be found.");
+    if (customerId && !user) throw new AIOrderValidationError("The signed-in customer account could not be found. Sign in again before placing this order.");
 
     const groupedItems = new Map<string, (typeof parsed.data.items)[number]>();
     for (const item of parsed.data.items) {
-      const key = `${item.productId}:${item.variantName ?? ""}`;
+      const productId = item.productId.toLowerCase();
+      const key = `${productId}:${item.variantName ?? ""}`;
       const existing = groupedItems.get(key);
       if (existing) {
         existing.quantity += item.quantity;
-        if (existing.quantity > 100) throw new Error("An item quantity cannot exceed 100.");
+        if (existing.quantity > 100) throw new AIOrderValidationError("An item quantity cannot exceed 100.");
       } else {
-        groupedItems.set(key, { ...item });
+        groupedItems.set(key, { ...item, productId });
       }
     }
 
@@ -972,10 +1010,10 @@ async function createAIOrder(
 
     for (const item of Array.from(groupedItems.values())) {
       const product = productsById.get(item.productId);
-      if (!product) throw new Error("A selected product is no longer available.");
+      if (!product) throw new AIOrderValidationError("A selected product is no longer available. Prepare a new order quote.");
       const category = categoriesById.get(product.category.toString());
       if (!category || !isAllowedNonFoodProduct({ ...product, category })) {
-        throw new Error("A selected item is not available in the supported catalog.");
+        throw new AIOrderValidationError("A selected item is no longer available in the supported catalog. Prepare a new order quote.");
       }
 
       let unitPrice = getProductSellingPrice(product);
@@ -983,7 +1021,7 @@ async function createAIOrder(
       let remainingStock: number;
       if (item.variantName) {
         const variant = product.variants.find((entry: ProductSchema["variants"][number]) => entry.name === item.variantName);
-        if (!variant) throw new Error(`The selected option for "${product.name}" is unavailable.`);
+        if (!variant) throw new AIOrderValidationError(`The selected option for "${product.name}" is unavailable. Prepare a new order quote.`);
         const variantPrice = variant.price ?? unitPrice;
         unitPrice = variant.salePrice != null && variant.salePrice < variantPrice
           ? variant.salePrice
@@ -1000,17 +1038,17 @@ async function createAIOrder(
             session,
           },
         );
-        if (updated.modifiedCount !== 1) throw new Error(`There is not enough stock for "${product.name}".`);
+        if (updated.modifiedCount !== 1) throw new AIOrderValidationError(`There is not enough stock for "${product.name}". Prepare a new order quote.`);
         remainingStock = variant.stock - item.quantity;
         variantName = variant.name;
       } else {
-        if (product.variants.length) throw new Error(`Choose an option for "${product.name}" before confirming.`);
+        if (product.variants.length) throw new AIOrderValidationError(`Choose an option for "${product.name}" before confirming.`);
         const updated = await Product.updateOne(
           { _id: product._id, status: "active", stock: { $gte: item.quantity } },
           { $inc: { stock: -item.quantity } },
           { session },
         );
-        if (updated.modifiedCount !== 1) throw new Error(`There is not enough stock for "${product.name}".`);
+        if (updated.modifiedCount !== 1) throw new AIOrderValidationError(`There is not enough stock for "${product.name}". Prepare a new order quote.`);
         remainingStock = product.stock - item.quantity;
       }
       inventoryMovements.push({
@@ -1046,14 +1084,23 @@ async function createAIOrder(
           ...parsed.data.customer,
           ...(authSession?.user?.email ? { email: authSession.user.email.toLowerCase() } : {}),
         },
+        shippingAddress: {
+          ...parsed.data.customer,
+          ...(authSession?.user?.email ? { email: authSession.user.email.toLowerCase() } : {}),
+        },
         ...(user ? { userId: user._id } : {}),
         items: orderItems,
         subtotal,
         deliveryCharge,
+        deliveryCharges: 0,
         total: subtotal + deliveryCharge,
+        paymentStatus: "Pending",
+        amountReceived: 0,
+        balanceAmount: subtotal + deliveryCharge,
         paymentMethod: "COD",
         orderSource: "AI Generated",
         status: "Pending",
+        statusHistory: [{ status: "Pending", timestamp: new Date() }],
       }],
       { session },
     );
@@ -1064,7 +1111,7 @@ async function createAIOrder(
         source: "AI" as const,
         referenceId: order._id,
       })),
-      { session },
+      { session, ordered: true },
     );
     return {
       orderNumber: order.orderNumber,
@@ -1084,9 +1131,6 @@ async function createAIOrder(
       status: "Pending",
       source: "AI Generated",
     };
-  } catch (error) {
-    if (error instanceof AIOrderValidationError) return { error: error.message };
-    throw error;
   } finally {
     await session.endSession();
   }
@@ -1115,7 +1159,7 @@ async function editAIOrder(
   if (!customerId || !Types.ObjectId.isValid(customerId)) {
     return { error: "For privacy, order changes require signing in to the account that placed the order. Guest customers should contact support." };
   }
-  if (!/\b(?:edit|update|change|correct|replace|fix|address|phone|city)\b/i.test(latestUserMessage)) {
+  if (!/\b(?:edit|update|change|correct|replace|fix|address|phone|city)\b|badal(?:o|na|(?:\s+kar)?\s+(?:do|dein|den))|theek kar/i.test(latestUserMessage)) {
     return { error: "Ask the customer what they want changed and require the exact order ID in their latest message before editing." };
   }
   if (!latestUserMessage.toUpperCase().includes(parsed.data.orderId)) {
@@ -1132,7 +1176,10 @@ async function editAIOrder(
     },
     {
       $set: Object.fromEntries(
-        Object.entries(parsed.data.customer).map(([key, value]) => [`customerDetails.${key}`, value]),
+        Object.entries(parsed.data.customer).flatMap(([key, value]) => [
+          [`customerDetails.${key}`, value],
+          [`shippingAddress.${key}`, value],
+        ]),
       ),
     },
     { new: true, runValidators: true },
@@ -1153,7 +1200,7 @@ async function deleteAIOrder(
     return { error: "For privacy, order cancellation requires signing in to the account that placed the order. Guest customers should contact support." };
   }
   const mentionsOrderId = latestUserMessage.toUpperCase().includes(parsed.data.orderId);
-  const confirmsCancellation = /\b(?:confirm(?:\s+the)?\s+cancellation|cancel(?:\s+my|\s+this)?\s+order|delete(?:\s+my|\s+this)?\s+order|order\s+cancel\s+kar\s+dein)\b/i.test(latestUserMessage);
+  const confirmsCancellation = /\b(?:confirm(?:\s+the)?\s+cancellation|cancel(?:\s+(?:my|this|the))?\s+order|delete(?:\s+(?:my|this|the))?\s+order|remove(?:\s+(?:my|this|the))?\s+order|(?:my|this|the|mera|ye|is)\s+order\s+(?:ko\s+)?(?:cancel|remove|delete)\s+kar\s+(?:do|dein|den)|order\s+(?:ko\s+)?(?:cancel|remove|delete)\s+kar\s+(?:do|dein|den))\b/i.test(latestUserMessage);
   if (!mentionsOrderId || !confirmsCancellation) {
     return { error: "Ask the signed-in customer to confirm cancellation and include the exact order ID in that confirmation." };
   }
@@ -1205,6 +1252,7 @@ async function deleteAIOrder(
       }
 
       order.status = "Cancelled";
+      order.statusHistory.push({ status: "Cancelled", timestamp: new Date() });
       await order.save({ session });
       return { orderId: order.orderNumber, status: order.status };
     });
@@ -1224,6 +1272,14 @@ async function createUniqueOrderNumber(session: import("mongoose").ClientSession
 }
 
 class AIOrderValidationError extends Error {}
+
+function isExplicitOrderConfirmation(message: string) {
+  const normalizedMessage = message.trim();
+  return (
+    /^(?:(?:yes|yeah|yep|sure|please|okay|ok|haan|han|ji|bilkul|theek hai)[,\s]+)*(?:confirm(?:\s+(?:my|the|this))?\s+order|place(?:\s+(?:my|the|this))?\s+order|order\s+(?:confirm|place)\s+kar(?:do|dein|den)|(?:confirm|place)\s+kar(?:do|dein|den)(?:\s+order)?)[\s.!]*$/i.test(normalizedMessage) ||
+    /^(?:yes(?:\s+please)?|yeah|yep|sure|okay|ok|haan|han|ji|bilkul|theek hai)[.!]*$/i.test(normalizedMessage)
+  );
+}
 
 function getProductSellingPrice(product: {
   price: number;
@@ -1331,6 +1387,55 @@ function renderOrderQuote(rawQuote: unknown) {
   ].join("\n");
 }
 
+function renderCartActions(cartActions: CartAction[]) {
+  return cartActions.map((item) =>
+    `🛍️ Added **${item.name}${item.variantName ? ` (${item.variantName})` : ""}** × ${item.quantity} to your bag. [View product](/product/${encodeURIComponent(item.slug)}) ✅`,
+  ).join("\n");
+}
+
+function parseToolResults(results: string[]) {
+  return results.flatMap((result) => {
+    try {
+      return [JSON.parse(result) as Record<string, unknown>];
+    } catch {
+      return [];
+    }
+  });
+}
+
+function getSuccessfulOrderAction(results: string[]) {
+  const action = parseToolResults(results).reverse().find(
+    (result) => result.success === true && typeof result.orderId === "string",
+  );
+  if (!action) return null;
+  const orderId = String(action.orderId);
+  if (action.status === "Cancelled") return `✅ Order **${orderId}** has been cancelled.`;
+  if (typeof action.customerName === "string") return `✅ Delivery details for order **${orderId}** have been updated.`;
+  return `✅ Your order is confirmed: **${orderId}**. The order number is saved for your records.`;
+}
+
+function getLatestOrderActionError(
+  calls: Array<{ name: string; result?: unknown }>,
+) {
+  const action = [...calls].reverse().find((call) =>
+    ["createOrder", "editOrder", "deleteOrder"].includes(call.name),
+  );
+  if (!action || typeof action.result !== "object" || action.result === null) return null;
+  const result = action.result as Record<string, unknown>;
+  if (result.success === true) return null;
+  return {
+    name: action.name,
+    message: typeof result.error === "string" ? result.error : "Please check the order details and try again.",
+  };
+}
+
+function getLatestToolError(results: string[]) {
+  const error = parseToolResults(results).reverse().find(
+    (result) => typeof result.error === "string",
+  )?.error;
+  return typeof error === "string" ? error.slice(0, 600) : null;
+}
+
 function answerUsesVerifiedFacts(answer: string, toolResults: string[]) {
   const verifiedProductCounts = toolResults.flatMap((result) => {
     try {
@@ -1427,21 +1532,13 @@ function collectNumbersByKey(value: unknown, targetKey: string): number[] {
 }
 
 function buildVerifiedFallbackReply(message: string, results: string[]) {
-  const parsedResults = results.flatMap((result) => {
-    try {
-      return [JSON.parse(result) as Record<string, unknown>];
-    } catch {
-      return [];
-    }
-  });
+  const parsedResults = parseToolResults(results);
   const countResult = parsedResults.find((result) => typeof result.count === "number");
   if (countResult && /\b(?:how many|number of|count)\b|kitne|kitni/i.test(message)) {
     return `✅ We currently have **${Number(countResult.count).toLocaleString("en-PK")} active products** in our catalog. 🛍️`;
   }
-  const orderResult = parsedResults.find((result) => result.success === true && typeof result.orderId === "string");
-  if (orderResult) {
-    return `✅ Your order is confirmed: **${orderResult.orderId}**. The order number is saved for your records.`;
-  }
+  const completedAction = getSuccessfulOrderAction(results);
+  if (completedAction) return completedAction;
   const stockResult = parsedResults.find((result) => typeof result.productId === "string" && Object.hasOwn(result, "stock"));
   if (stockResult) {
     const stockText = Array.isArray(stockResult.stock)
@@ -1468,7 +1565,7 @@ function buildVerifiedFallbackReply(message: string, results: string[]) {
 
 function isProductLookupRequest(message: string) {
   if (/^(?:hi|hello|hey|thanks|thank you|good morning|good evening)\b/i.test(message.trim())) return false;
-  if (/\b(?:order status|track (?:my )?order|delivery charge|shipping|return policy|refund|cancel (?:my )?order)\b/i.test(message)) return false;
+  if (/\b(?:order status|track (?:my )?order|delivery charge|shipping|return policy|refund|cancel (?:my )?order|remove (?:my )?order)\b/i.test(message)) return false;
   const mentionsCatalog = /\b(?:product|products|item|items|price|stock|available|availability|buy|shop|find|search|looking for|need|want|show|see|recommend|category|brand|catalog|in stock|have)\b|dikha|dhoond|milay|qeemat|daam|maujood|stock mein/i.test(message);
   return mentionsCatalog || AI_NON_FOOD_CATEGORIES.some((category) =>
     category.split(/\s+/).some((term) => term.length > 3 && new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(message)),

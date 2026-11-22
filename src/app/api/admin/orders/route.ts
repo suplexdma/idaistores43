@@ -7,6 +7,7 @@ import Order, { type Order as OrderSchema } from "@/models/Order";
 import InventoryLog from "@/models/InventoryLog";
 import Product, { type Product as ProductSchema } from "@/models/Product";
 import TrashEntry from "@/models/TrashEntry";
+import DeliveryCompany from "@/models/DeliveryCompany";
 
 const statuses = ["Pending", "Confirmed", "Shipped", "Delivered", "Cancelled", "Returned"] as const;
 const sources = ["Website", "WhatsApp", "AI", "AI Generated", "POS"] as const;
@@ -18,6 +19,21 @@ const updateSchema = z
   .object({
     status: z.enum(statuses).optional(),
     internalNotes: z.string().trim().max(2000).optional(),
+    deliveryCompanyId: z.string().regex(/^[a-f\d]{24}$/i).nullable().optional(),
+    deliveryCompany: z.string().trim().max(120).optional(),
+    deliveryCharges: z.number().finite().min(0).optional(),
+    deliveryDate: z.string().datetime({ offset: true }).nullable().optional(),
+    estimatedArrival: z.string().datetime({ offset: true }).nullable().optional(),
+    trackingNumber: z.string().trim().max(100).optional(),
+    paymentStatus: z.enum(["Pending", "Partial", "Partially Paid", "Paid", "Refunded"]).optional(),
+    amountReceived: z.number().finite().min(0).optional(),
+    shippingAddress: z.object({
+      name: z.string().trim().min(2).max(100),
+      phone: z.string().trim().max(30),
+      address: z.string().trim().min(5).max(500),
+      area: z.string().trim().max(150).optional(),
+      city: z.string().trim().min(2).max(100),
+    }).optional(),
   })
   .refine((value) => Object.keys(value).length > 0);
 
@@ -44,10 +60,17 @@ export async function GET(request: NextRequest) {
     }
     if (parsed.data.status) filter.status = parsed.data.status;
     const orders = await Order.find(filter)
-      .select("orderNumber customerDetails.name customerDetails.phone customerDetails.email customerDetails.notes items subtotal deliveryCharge total paymentMethod status orderSource internalNotes createdAt returnedAt")
+      .select("+internalNotes orderNumber customerDetails shippingAddress items subtotal deliveryCharge deliveryCharges total paymentMethod paymentStatus amountReceived balanceAmount status orderSource deliveryCompanyId deliveryCompany deliveryDate estimatedArrival trackingNumber statusHistory createdAt returnedAt")
       .sort({ createdAt: -1 })
       .limit(100)
       .lean();
+    const productIds = Array.from(new Set(
+      orders.flatMap((order) => order.items.map((item: OrderSchema["items"][number]) => item.productId.toString())),
+    ));
+    const products = await Product.find({ _id: { $in: productIds } })
+      .select("sku barcode images variants")
+      .lean();
+    const productsById = new Map(products.map((product) => [product._id.toString(), product]));
 
     return NextResponse.json({
       orders: orders.map((order) => ({
@@ -56,22 +79,51 @@ export async function GET(request: NextRequest) {
         customer: order.customerDetails.name,
         phone: order.customerDetails.phone,
         email: order.customerDetails.email ?? "",
+        address: order.shippingAddress?.address ?? order.customerDetails.address,
+        area: order.shippingAddress?.area ?? order.customerDetails.area ?? "",
+        city: order.shippingAddress?.city ?? order.customerDetails.city,
         customerNotes: order.customerDetails.notes ?? "",
-        items: order.items.map((item: OrderSchema["items"][number]) => ({
-          name: item.name,
-          quantity: item.quantity,
-          variantName: item.variantName ?? "",
-        })),
+        items: order.items.map((item: OrderSchema["items"][number]) => {
+          const product = productsById.get(item.productId.toString());
+          const variant = item.variantName
+            ? product?.variants.find((entry: ProductSchema["variants"][number]) => entry.name === item.variantName)
+            : undefined;
+          return {
+            name: item.name,
+            quantity: item.quantity,
+            variantName: item.variantName ?? "",
+            unitPrice: item.unitPrice,
+            image: item.image ?? variant?.image?.url ?? product?.images[0]?.url ?? "",
+            sku: item.sku ?? variant?.sku ?? product?.sku ?? "",
+            barcode: item.barcode ?? product?.barcode ?? "",
+          };
+        }),
         itemCount: order.items.reduce(
           (sum: number, item: OrderSchema["items"][number]) => sum + item.quantity,
           0,
         ),
         total: order.total,
+        subtotal: order.subtotal,
+        deliveryCharge: order.deliveryCharge,
+        deliveryCharges: order.deliveryCharges ?? 0,
         status: order.status,
         returnedAt: order.returnedAt?.toISOString() ?? null,
         source: order.orderSource,
         internalNotes: order.internalNotes ?? "",
         createdAt: order.createdAt,
+        deliveryCompanyId: order.deliveryCompanyId?.toString() ?? "",
+        deliveryCompany: order.deliveryCompany ?? "",
+        deliveryDate: order.deliveryDate?.toISOString() ?? null,
+        estimatedArrival: order.estimatedArrival?.toISOString() ?? null,
+        trackingNumber: order.trackingNumber ?? "",
+        paymentStatus: order.paymentStatus ?? "Pending",
+        amountReceived: order.amountReceived ?? 0,
+        balanceAmount: order.balanceAmount ?? order.total + (order.deliveryCharges ?? 0),
+        statusHistory: (order.statusHistory ?? []).map((entry: { status: string; timestamp?: Date; note?: string }) => ({
+          status: entry.status,
+          timestamp: entry.timestamp?.toISOString(),
+          note: entry.note ?? "",
+        })),
       })),
     });
   } catch (error) {
@@ -131,7 +183,9 @@ export async function PATCH(request: NextRequest) {
 
   try {
     await connectToDatabase();
-    const currentOrder = await Order.findOne({ _id: orderId, deletedAt: null }).select("status returnedAt").lean();
+    const currentOrder = await Order.findOne({ _id: orderId, deletedAt: null })
+      .select("status returnedAt total deliveryCharges amountReceived")
+      .lean();
     if (!currentOrder) {
       return NextResponse.json({ error: "Order not found." }, { status: 404 });
     }
@@ -185,6 +239,12 @@ export async function PATCH(request: NextRequest) {
             );
           }
           order.status = "Cancelled";
+          order.statusHistory.push({
+            status: "Cancelled",
+            timestamp: new Date(),
+            ...(admin?.sub ? { changedBy: new Types.ObjectId(admin.sub) } : {}),
+            ...(internalNotes ? { note: internalNotes } : {}),
+          });
           if (internalNotes !== undefined) order.internalNotes = internalNotes;
           await order.save({ session });
           result = {
@@ -205,6 +265,13 @@ export async function PATCH(request: NextRequest) {
       if (!cancelled) return NextResponse.json({ error: "Order is no longer pending." }, { status: 409 });
       return NextResponse.json({ order: cancelled });
     }
+    if (input.deliveryCompanyId) {
+      const company = await DeliveryCompany.findById(input.deliveryCompanyId).select("name").lean();
+      if (!company) return NextResponse.json({ error: "Delivery company not found." }, { status: 404 });
+      input.deliveryCompany = company.name;
+    } else if (input.deliveryCompanyId === null) {
+      input.deliveryCompany = "";
+    }
     if (input.status === "Cancelled" && currentOrder.status !== "Cancelled") {
       return NextResponse.json({ error: "Only pending orders can be cancelled." }, { status: 409 });
     }
@@ -212,16 +279,61 @@ export async function PATCH(request: NextRequest) {
     const update: Record<string, unknown> = {};
     if (input.status) update.status = input.status;
     if (input.internalNotes !== undefined) update.internalNotes = input.internalNotes;
+    if (input.deliveryCompanyId !== undefined) update.deliveryCompanyId = input.deliveryCompanyId || null;
+    if (input.deliveryCompany !== undefined) update.deliveryCompany = input.deliveryCompany;
+    if (input.deliveryCharges !== undefined) update.deliveryCharges = input.deliveryCharges;
+    if (input.deliveryDate !== undefined) update.deliveryDate = input.deliveryDate ? new Date(input.deliveryDate) : null;
+    if (input.estimatedArrival !== undefined) update.estimatedArrival = input.estimatedArrival ? new Date(input.estimatedArrival) : null;
+    if (input.trackingNumber !== undefined) update.trackingNumber = input.trackingNumber;
+    if (input.shippingAddress !== undefined) {
+      update.shippingAddress = {
+        ...input.shippingAddress,
+        area: input.shippingAddress.area ?? "",
+      };
+    }
+    const payableTotal = currentOrder.total + (input.deliveryCharges ?? currentOrder.deliveryCharges ?? 0);
+    const amountReceived = input.amountReceived ??
+      (input.paymentStatus === "Paid"
+        ? payableTotal
+        : input.paymentStatus === "Pending" || input.paymentStatus === "Refunded"
+          ? 0
+          : currentOrder.amountReceived ?? 0);
+    if (input.amountReceived !== undefined || input.paymentStatus !== undefined || input.deliveryCharges !== undefined) {
+      if (
+        amountReceived > payableTotal ||
+        (input.paymentStatus === "Paid" && amountReceived !== payableTotal) ||
+        (input.paymentStatus === "Partial" || input.paymentStatus === "Partially Paid") &&
+          (amountReceived <= 0 || amountReceived >= payableTotal) ||
+        input.paymentStatus === "Pending" && amountReceived !== 0
+      ) {
+        return NextResponse.json({ error: "Payment status and amount received do not match the final payable amount." }, { status: 400 });
+      }
+      update.amountReceived = amountReceived;
+      update.balanceAmount = Math.max(0, payableTotal - amountReceived);
+      if (input.paymentStatus !== undefined) {
+        update.paymentStatus = input.paymentStatus === "Partially Paid" ? "Partial" : input.paymentStatus;
+      } else if (amountReceived === 0) {
+        update.paymentStatus = "Pending";
+      } else if (amountReceived >= payableTotal) {
+        update.paymentStatus = "Paid";
+      } else {
+        update.paymentStatus = "Partial";
+      }
+    }
     if (input.status === "Returned") {
       update.returnedAt = currentOrder.status === "Returned" && currentOrder.returnedAt
         ? currentOrder.returnedAt
         : new Date();
     }
 
+    const admin = await getAdminSession();
     const order = await Order.findOneAndUpdate(
       { _id: orderId, deletedAt: null },
       {
         $set: update,
+        ...(input.status && input.status !== currentOrder.status
+          ? { $push: { statusHistory: { status: input.status, timestamp: new Date(), changedBy: admin?.sub ? new Types.ObjectId(admin.sub) : undefined, note: input.internalNotes ?? "" } } }
+          : {}),
         ...(input.status && input.status !== "Returned" && currentOrder.status === "Returned"
           ? { $unset: { returnedAt: "" } }
           : {}),

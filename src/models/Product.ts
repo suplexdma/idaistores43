@@ -39,6 +39,12 @@ const productSchema = new Schema(
     salePrice: { type: Number, min: 0 },
     sku: { type: String, trim: true, uppercase: true },
     barcode: { type: String, trim: true },
+    sellingUnit: { type: String, enum: ["Piece", "Pack", "Box", "Dozen"], default: "Piece" },
+    unitConversions: {
+      type: [{ unit: { type: String, enum: ["Piece", "Pack", "Box", "Dozen"], required: true }, piecesPerUnit: { type: Number, min: 1, required: true } }],
+      default: [],
+    },
+    reservationMode: { type: String, enum: ["Placement", "Payment"], default: "Placement" },
     stock: { type: Number, required: true, min: 0, default: 0 },
     lowStockThreshold: { type: Number, required: true, min: 0, default: 3 },
     images: { type: [productImageSchema], default: [] },

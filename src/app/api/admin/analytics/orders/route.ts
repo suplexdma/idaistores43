@@ -5,7 +5,7 @@ import { RETURN_DELIVERY_LOSS_PKR } from "@/lib/order-return";
 import Order from "@/models/Order";
 
 const PKT_OFFSET_MS = 5 * 60 * 60 * 1000;
-const ranges = ["year", "6months", "3months", "month", "7days", "day", "hours", "minutes"] as const;
+const ranges = ["this-month", "last-month", "yearly", "custom"] as const;
 type Range = (typeof ranges)[number];
 type BucketUnit = "minute" | "hour" | "day" | "month";
 
@@ -15,25 +15,19 @@ function pktStartOfDay(date: Date) {
 }
 
 function getRange(range: Range, now: Date): { start: Date; unit: BucketUnit; count: number } {
-  if (range === "minutes") {
-    const start = new Date(Math.floor(now.getTime() / 60_000) * 60_000 - 59 * 60_000);
-    return { start, unit: "minute", count: 60 };
-  }
-  if (range === "hours") {
-    const start = new Date(Math.floor(now.getTime() / 3_600_000) * 3_600_000 - 23 * 3_600_000);
-    return { start, unit: "hour", count: 24 };
-  }
-  if (range === "day") {
-    return { start: pktStartOfDay(now), unit: "hour", count: new Date(now.getTime() + PKT_OFFSET_MS).getUTCHours() + 1 };
-  }
-  if (range === "7days") {
-    return { start: new Date(pktStartOfDay(now).getTime() - 6 * 86_400_000), unit: "day", count: 7 };
-  }
-
-  const monthCount = range === "year" ? 12 : range === "6months" ? 6 : range === "3months" ? 3 : 1;
   const pktNow = new Date(now.getTime() + PKT_OFFSET_MS);
-  const start = new Date(Date.UTC(pktNow.getUTCFullYear(), pktNow.getUTCMonth() - monthCount + 1, 1) - PKT_OFFSET_MS);
-  return { start, unit: "month", count: monthCount };
+  if (range === "this-month") {
+    const start = new Date(Date.UTC(pktNow.getUTCFullYear(), pktNow.getUTCMonth(), 1) - PKT_OFFSET_MS);
+    return { start, unit: "day", count: pktNow.getUTCDate() };
+  }
+  if (range === "last-month") {
+    const start = new Date(Date.UTC(pktNow.getUTCFullYear(), pktNow.getUTCMonth() - 1, 1) - PKT_OFFSET_MS);
+    const end = new Date(Date.UTC(pktNow.getUTCFullYear(), pktNow.getUTCMonth(), 0) - PKT_OFFSET_MS);
+    const pktEnd = new Date(end.getTime() + PKT_OFFSET_MS);
+    return { start, unit: "day", count: pktEnd.getUTCDate() };
+  }
+  const start = new Date(Date.UTC(pktNow.getUTCFullYear(), 0, 1) - PKT_OFFSET_MS);
+  return { start, unit: "month", count: 12 };
 }
 
 function bucketStarts(start: Date, unit: BucketUnit, count: number) {
@@ -70,7 +64,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Forbidden." }, { status: 403 });
   }
 
-  const requestedRange = request.nextUrl.searchParams.get("range") ?? "7days";
+  const requestedRange = request.nextUrl.searchParams.get("range") ?? "this-month";
   if (!ranges.includes(requestedRange as Range)) {
     return NextResponse.json({ error: "Invalid graph range." }, { status: 400 });
   }
@@ -78,7 +72,24 @@ export async function GET(request: NextRequest) {
   try {
     await connectToDatabase();
     const now = new Date();
-    const range = getRange(requestedRange as Range, now);
+    let range = getRange(requestedRange as Range, now);
+    if (requestedRange === "yearly") {
+      const requestedYear = Number(request.nextUrl.searchParams.get("year"));
+      const year = Number.isInteger(requestedYear) && requestedYear >= 2000 && requestedYear <= 2100 ? requestedYear : new Date().getUTCFullYear();
+      range = { start: new Date(Date.UTC(year, 0, 1) - PKT_OFFSET_MS), unit: "month", count: 12 };
+    }
+    if (requestedRange === "custom") {
+      const startValue = request.nextUrl.searchParams.get("start");
+      const endValue = request.nextUrl.searchParams.get("end");
+      if (!startValue || !endValue) return NextResponse.json({ error: "Custom date range requires start and end dates." }, { status: 400 });
+      const start = new Date(`${startValue}T00:00:00+05:00`);
+      const end = new Date(`${endValue}T23:59:59.999+05:00`);
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) return NextResponse.json({ error: "Invalid custom date range." }, { status: 400 });
+      const pktStart = new Date(start.getTime() + PKT_OFFSET_MS);
+      const pktEnd = new Date(end.getTime() + PKT_OFFSET_MS);
+      const dayCount = Math.max(1, Math.min(366, Math.ceil((Date.UTC(pktEnd.getUTCFullYear(), pktEnd.getUTCMonth(), pktEnd.getUTCDate()) - Date.UTC(pktStart.getUTCFullYear(), pktStart.getUTCMonth(), pktStart.getUTCDate())) / 86_400_000) + 1));
+      range = { start: pktStartOfDay(start), unit: "day", count: dayCount };
+    }
     const [grouped, returnedGrouped] = await Promise.all([
       Order.aggregate<{
         _id: Date;

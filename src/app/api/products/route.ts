@@ -91,7 +91,16 @@ export async function GET(request: NextRequest) {
   if (inStock !== null && inStock !== "true" && inStock !== "false") {
     return NextResponse.json({ error: "inStock must be true or false." }, { status: 400 });
   }
-  if (search) filter.$text = { $search: search };
+  if (search) {
+    filter.$and = [{
+      $or: [
+        { barcode: search },
+        { sku: search.toUpperCase() },
+        { name: { $regex: search, $options: "i" } },
+        { brand: { $regex: search, $options: "i" } },
+      ],
+    }];
+  }
   if (categories.length > 0) {
     if (categories.some((categoryId) => !isValidObjectId(categoryId))) {
       return NextResponse.json({ error: "Invalid category id." }, { status: 400 });
@@ -157,6 +166,9 @@ export async function GET(request: NextRequest) {
 
     const total = includeTotal ? await Product.countDocuments(filter) : 0;
     const sort: Record<string, 1 | -1> =
+      search
+        ? { exactBarcodeMatch: -1, exactSkuMatch: -1, createdAt: -1, _id: -1 }
+        :
       sortValue === "price-asc"
         ? { effectivePrice: 1, _id: 1 }
         : sortValue === "price-desc"
@@ -169,6 +181,8 @@ export async function GET(request: NextRequest) {
         $addFields: {
           effectivePrice: effectivePriceExpression,
           stock: effectiveStockExpression,
+          exactBarcodeMatch: search ? { $cond: [{ $eq: [{ $ifNull: ["$barcode", ""] }, search] }, 1, 0] } : 0,
+          exactSkuMatch: search ? { $cond: [{ $eq: [{ $ifNull: ["$sku", ""] }, search.toUpperCase()] }, 1, 0] } : 0,
         },
       },
     ];

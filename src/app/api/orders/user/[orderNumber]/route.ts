@@ -33,7 +33,10 @@ export async function GET(_request: NextRequest, { params }: RouteContext) {
         createdAt: order.createdAt,
         status: order.status,
         paymentMethod: order.paymentMethod,
-        customerDetails: order.customerDetails,
+        customerDetails: {
+          ...order.customerDetails,
+          ...(order.shippingAddress ?? {}),
+        },
         items: order.items.map((item: OrderSchema["items"][number]) => ({
           name: item.name,
           image: item.image,
@@ -43,7 +46,13 @@ export async function GET(_request: NextRequest, { params }: RouteContext) {
         })),
         subtotal: order.subtotal,
         deliveryCharge: order.deliveryCharge,
+        deliveryCharges: order.deliveryCharges ?? 0,
         total: order.total,
+        deliveryCompany: order.deliveryCompany ?? "",
+        trackingNumber: order.trackingNumber ?? "",
+        deliveryDate: order.deliveryDate,
+        estimatedArrival: order.estimatedArrival,
+        paymentStatus: order.paymentStatus ?? "Pending",
       },
     });
   } catch (error) {

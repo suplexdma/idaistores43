@@ -16,7 +16,7 @@ const inventoryLogSchema = new Schema(
     reason: { type: String, required: true, trim: true, maxlength: 500 },
     source: {
       type: String,
-      enum: ["Manual", "Purchase", "Website", "AI", "POS", "Cancellation"],
+      enum: ["Manual", "Purchase", "Website", "AI", "POS", "Cancellation", "Sale", "Return", "Damage", "Adjustment"],
       default: "Manual",
       required: true,
     },

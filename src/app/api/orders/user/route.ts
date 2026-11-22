@@ -16,7 +16,7 @@ export async function GET() {
     const orders = await Order.find({ userId: new Types.ObjectId(session.user.id), deletedAt: null })
       .sort({ createdAt: -1 })
       .limit(50)
-      .select("orderNumber createdAt status total items")
+      .select("orderNumber createdAt status total deliveryCharges items")
       .lean();
 
     return NextResponse.json({
@@ -24,7 +24,7 @@ export async function GET() {
         orderNumber: order.orderNumber,
         createdAt: order.createdAt,
         status: order.status,
-        total: order.total,
+        total: order.total + (order.deliveryCharges ?? 0),
         itemCount: order.items.reduce(
           (count: number, item: OrderSchema["items"][number]) => count + item.quantity,
           0,

@@ -59,8 +59,6 @@ export function ProductCard({ product }: ProductCardProps) {
     ? product.variants.reduce((total, variant) => total + variant.stock, 0)
     : product.stock;
   const hasVariants = Boolean(product.variants?.length);
-  const rating = product.rating?.averageRating ?? 0;
-  const reviewCount = product.rating?.reviewCount ?? 0;
 
   function addProduct() {
     if (hasVariants) {
@@ -165,7 +163,6 @@ export function ProductCard({ product }: ProductCardProps) {
                   </p>
                 )}
                 <h3 className="mt-2 text-2xl font-semibold">{product.name}</h3>
-                <RatingStars rating={rating} reviewCount={reviewCount} />
                 <Price price={product.price} compareAtPrice={product.compareAtPrice} salePrice={product.salePrice} className="mt-4 text-xl" />
                 <p className="mt-4 line-clamp-5 text-sm leading-6 text-muted-foreground">
                   {product.description || "A thoughtful find, selected with care by IDAI STORES 43."}
@@ -208,7 +205,6 @@ export function ProductCard({ product }: ProductCardProps) {
             {product.name}
           </h3>
         </Link>
-        <RatingStars rating={rating} reviewCount={reviewCount} />
         <Price price={product.price} compareAtPrice={product.compareAtPrice} salePrice={product.salePrice} className="mt-2 text-sm" />
         <div className="mt-3 grid grid-cols-2 gap-2">
           <Button

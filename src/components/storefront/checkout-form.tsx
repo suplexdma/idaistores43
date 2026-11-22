@@ -92,7 +92,10 @@ export function CheckoutForm({ prefill }: { prefill: CheckoutPrefill }) {
       if (!response.ok || !result.orderNumber) {
         if (whatsappWindow && !whatsappWindow.closed) whatsappWindow.close();
         const message =
-          typeof result.error === "string" ? result.error : "Unable to place your order.";
+          typeof result.error === "string"
+            ? result.error
+            : result.error?.map((issue) => issue.message).filter(Boolean).join(" ") ||
+              "Unable to place your order.";
         setServerError(message);
         return;
       }

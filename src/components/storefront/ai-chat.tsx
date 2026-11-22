@@ -116,7 +116,7 @@ export function AiChat() {
   const sessionId = useRef<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const messageInputRef = useRef<HTMLInputElement>(null);
+  const messageInputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     sessionId.current = window.localStorage.getItem("idai-ai-session");
@@ -136,6 +136,13 @@ export function AiChat() {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, open]);
+
+  useEffect(() => {
+    const textarea = messageInputRef.current;
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 112)}px`;
+  }, [input, open]);
 
   async function sendMessage(event?: FormEvent<HTMLFormElement>, suggestedMessage?: string) {
     event?.preventDefault();
@@ -278,12 +285,27 @@ export function AiChat() {
         </div>
       )}
       {error && <p role="alert" className="shrink-0 px-4 pt-2 text-xs text-destructive">{error}</p>}
-      <form onSubmit={(event) => void sendMessage(event)} className="flex shrink-0 items-center gap-1.5 border-t bg-white p-3 sm:gap-2 sm:p-4">
+      <form onSubmit={(event) => void sendMessage(event)} className="flex shrink-0 items-end gap-1.5 border-t bg-white p-3 sm:gap-2 sm:p-4">
         <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" aria-label="Attach an image" onChange={(event) => chooseImage(event.currentTarget.files?.[0])} />
         <button type="button" aria-label="Attach an image" onClick={() => fileRef.current?.click()} className="flex size-10 shrink-0 items-center justify-center rounded-full text-brand-olive transition hover:bg-brand-olive/10"><ImagePlus className="size-5" /></button>
         <button type="button" aria-label={listening ? "Listening" : "Speak your message"} onClick={startVoiceInput} disabled={listening} className={`flex size-10 shrink-0 items-center justify-center rounded-full transition ${listening ? "bg-brand-gold/20 text-brand-charcoal" : "text-brand-olive hover:bg-brand-olive/10"}`}><Mic className="size-5" /></button>
         <label className="sr-only" htmlFor="ai-chat-message">Message the shopping assistant</label>
-        <input ref={messageInputRef} id="ai-chat-message" value={input} onChange={(event) => setInput(event.target.value)} maxLength={1000} placeholder="Ask in English or Roman Urdu…" className="h-10 min-w-0 flex-1 rounded-full border border-input px-3 text-sm outline-none focus:border-brand-olive focus:ring-2 focus:ring-brand-olive/20 sm:px-4" />
+        <textarea
+          ref={messageInputRef}
+          id="ai-chat-message"
+          rows={1}
+          value={input}
+          onChange={(event) => setInput(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              event.currentTarget.form?.requestSubmit();
+            }
+          }}
+          maxLength={10_000}
+          placeholder="Ask in English or Roman Urdu…"
+          className="max-h-28 min-h-10 min-w-0 flex-1 resize-none overflow-y-auto rounded-2xl border border-input px-3 py-2.5 text-sm outline-none focus:border-brand-olive focus:ring-2 focus:ring-brand-olive/20 sm:px-4"
+        />
         <Button type="submit" size="icon" aria-label="Send message" disabled={sending || (!input.trim() && !image)} className="size-10 shrink-0 rounded-full bg-brand-olive hover:bg-brand-olive/90"><Send aria-hidden="true" className="size-4" /></Button>
       </form>
     </section>

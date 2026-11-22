@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   Bot,
   ClipboardList,
+  BarChart3,
   FileText,
   History,
   LayoutDashboard,
@@ -36,6 +37,7 @@ const navigation = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
   { href: "/admin/products", label: "Products", icon: Package },
   { href: "/admin/orders", label: "Orders", icon: ShoppingCart },
+  { href: "/admin/reports", label: "Reports", icon: BarChart3 },
   { href: "/admin/inventory/pos", label: "Point of Sale", icon: ScanLine },
   { href: "/admin/inventory/purchase-invoices", label: "Purchase Invoices", icon: ClipboardList },
   { href: "/admin/inventory/suppliers", label: "Suppliers", icon: Truck },
@@ -46,6 +48,7 @@ const navigation = [
   { href: "/admin/notes-tasks", label: "Notes & Tasks", icon: NotebookPen, editorOnly: true },
   { href: "/admin/posts", label: "Posts", icon: FileText, editorOnly: true },
   { href: "/admin/trash", label: "Trash", icon: Trash2 },
+  { href: "/admin/settings/delivery-companies", label: "Delivery Companies", icon: Truck, fullAccessOnly: true },
   { href: "/admin/settings", label: "Settings", icon: Settings, fullAccessOnly: true },
 ];
 
