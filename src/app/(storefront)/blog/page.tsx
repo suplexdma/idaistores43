@@ -3,6 +3,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { connectToDatabase } from "@/lib/db";
 import Post from "@/models/Post";
+import { cloudinaryImageUrl, isCloudinaryImageUrl } from "@/lib/cloudinary-url";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
@@ -30,7 +31,7 @@ export default async function BlogPage() {
           <article key={post._id.toString()} className="group overflow-hidden rounded-2xl border bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-lg">
             <Link href={`/blog/${post.slug}`} className="block">
               <div className="relative aspect-[1.55/1] bg-muted">
-                {post.coverImage?.url && <Image src={post.coverImage.url} alt="" fill sizes="(max-width: 640px) 95vw, (max-width: 1024px) 45vw, 30vw" className="object-cover transition-transform duration-500 group-hover:scale-[1.03]" />}
+                {post.coverImage?.url && <Image src={cloudinaryImageUrl(post.coverImage.url, 768)} unoptimized={isCloudinaryImageUrl(post.coverImage.url)} alt="" fill sizes="(max-width: 640px) 95vw, (max-width: 1024px) 45vw, 30vw" className="object-cover transition-transform duration-500 group-hover:scale-[1.03]" />}
               </div>
               <div className="p-5">
                 {post.publishedAt && <time dateTime={post.publishedAt.toISOString()} className="text-xs text-muted-foreground">{new Intl.DateTimeFormat("en-PK", { dateStyle: "medium", timeZone: "Asia/Karachi" }).format(post.publishedAt)} PKT</time>}

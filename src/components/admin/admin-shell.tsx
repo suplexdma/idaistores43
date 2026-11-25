@@ -14,6 +14,7 @@ import {
   Menu,
   NotebookPen,
   Package,
+  CreditCard,
   Settings,
   ScanLine,
   ShoppingCart,
@@ -49,6 +50,8 @@ const navigation = [
   { href: "/admin/posts", label: "Posts", icon: FileText, editorOnly: true },
   { href: "/admin/trash", label: "Trash", icon: Trash2 },
   { href: "/admin/settings/delivery-companies", label: "Delivery Companies", icon: Truck, fullAccessOnly: true },
+  { href: "/admin/settings/delivery-companies/reports", label: "Courier Reports", icon: Truck, fullAccessOnly: true },
+  { href: "/admin/online-payments", label: "Online Payments", icon: CreditCard, fullAccessOnly: true },
   { href: "/admin/settings", label: "Settings", icon: Settings, fullAccessOnly: true },
 ];
 
@@ -113,7 +116,11 @@ export function AdminShell({ children, name, email, accessLevel }: AdminShellPro
           </div>
           <nav aria-label="Admin navigation" className="space-y-1">
             {visibleNavigation.map(({ href, label, icon: Icon }) => {
-              const active = href === "/admin" ? pathname === href : pathname.startsWith(href);
+              const active = href === "/admin"
+                ? pathname === href
+                : href === "/admin/settings/delivery-companies"
+                  ? pathname === href
+                  : pathname.startsWith(href);
               return (
                 <Link
                   key={href}

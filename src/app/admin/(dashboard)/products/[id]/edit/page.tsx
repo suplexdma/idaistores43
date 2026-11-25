@@ -55,6 +55,8 @@ export default async function EditProductPage({ params }: EditProductPageProps) 
           sku: product.sku,
           barcode: product.barcode,
           stock: product.stock,
+          weight: product.weight,
+          dimensions: product.dimensions,
           lowStockThreshold: product.lowStockThreshold ?? 3,
           status: product.status === "active" ? "active" : "draft",
           categoryIds: product.categories?.length

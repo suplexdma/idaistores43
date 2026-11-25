@@ -22,7 +22,9 @@ export async function GET(_request: NextRequest, { params }: RouteContext) {
       orderNumber: params.orderNumber,
       userId: new Types.ObjectId(session.user.id),
       deletedAt: null,
-    }).lean();
+    })
+      .select("orderNumber createdAt status paymentMethod customerDetails shippingAddress items subtotal deliveryCharge deliveryCharges total deliveryCompany deliveryCompanyId trackingNumber deliveryDate estimatedArrival paymentStatus")
+      .lean();
     if (!order) {
       return NextResponse.json({ error: "Order not found." }, { status: 404 });
     }

@@ -1,7 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Eye } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 type Summary = {
   totalInvoices: number; grossSales: number; discounts: number; deliveryCharges: number;
@@ -9,6 +17,21 @@ type Summary = {
   amountReceived: number; pendingPayments: number;
 };
 type Row = { invoiceNo: string; date: string; customer: string; type: string; paymentMode: string; paymentStatus: string; total: number; received: number; balance: number; status: string };
+type Invoice = {
+  orderNumber: string;
+  createdAt: string;
+  customerDetails: { name: string; phone: string; address: string; area?: string; city: string; email?: string };
+  items: { name: string; sku?: string; barcode?: string; variantName?: string; quantity: number; unitPrice: number }[];
+  subtotal: number;
+  deliveryCharge: number;
+  deliveryCharges?: number;
+  total: number;
+  paymentMethod: string;
+  paymentStatus: string;
+  amountReceived?: number;
+  balanceAmount?: number;
+  status: string;
+};
 
 export default function SalesReportPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -18,6 +41,10 @@ export default function SalesReportPage() {
   const [customer, setCustomer] = useState("");
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(true);
+  const [invoiceOpen, setInvoiceOpen] = useState(false);
+  const [invoice, setInvoice] = useState<Invoice | null>(null);
+  const [invoiceLoading, setInvoiceLoading] = useState(false);
+  const [invoiceError, setInvoiceError] = useState("");
 
   async function load() {
     setLoading(true);
@@ -40,6 +67,22 @@ export default function SalesReportPage() {
   }, []);
 
   const money = (value: number) => `PKR ${value.toLocaleString("en-PK", { maximumFractionDigits: 2 })}`;
+  async function viewInvoice(invoiceNo: string) {
+    setInvoiceOpen(true);
+    setInvoice(null);
+    setInvoiceError("");
+    setInvoiceLoading(true);
+    try {
+      const response = await fetch(`/api/admin/reports/sales/invoice?orderNumber=${encodeURIComponent(invoiceNo)}`);
+      const data = await response.json() as { invoice?: Invoice; error?: string };
+      if (!response.ok || !data.invoice) throw new Error(data.error ?? "Unable to load invoice.");
+      setInvoice(data.invoice);
+    } catch (error) {
+      setInvoiceError(error instanceof Error ? error.message : "Unable to load invoice.");
+    } finally {
+      setInvoiceLoading(false);
+    }
+  }
   function exportReport(format: "csv"|"xlsx"|"pdf") {
     const params = new URLSearchParams({ format });
     if (start) params.set("start", start); if (end) params.set("end", end);
@@ -72,10 +115,42 @@ export default function SalesReportPage() {
       </div>}
       <Card><CardHeader><CardTitle>Transactions</CardTitle></CardHeader><CardContent className="overflow-x-auto">
         {loading ? <p className="py-10 text-center text-sm text-muted-foreground">Loading...</p> : rows.length === 0 ? <p className="py-10 text-center text-sm text-muted-foreground">No transactions match the selected filters.</p> : (
-          <table className="w-full text-left text-sm"><thead className="border-b"><tr>{["Invoice","Date","Customer","Type","Payment","Total","Received","Balance","Status"].map((h) => <th key={h} className="p-3">{h}</th>)}</tr></thead>
-          <tbody>{rows.map((row) => <tr key={row.invoiceNo} className="border-b"><td className="p-3 font-medium">{row.invoiceNo}</td><td className="p-3">{new Date(row.date).toLocaleDateString("en-PK")}</td><td className="p-3">{row.customer}</td><td className="p-3">{row.type}</td><td className="p-3">{row.paymentMode}</td><td className="p-3">{money(row.total)}</td><td className="p-3">{money(row.received)}</td><td className="p-3">{money(row.balance)}</td><td className="p-3">{row.status}</td></tr>)}</tbody></table>
+          <table className="w-full min-w-[1050px] text-left text-sm"><thead className="border-b"><tr>{["Invoice","Date","Customer","Type","Payment","Total","Received","Balance","Status","Invoice details"].map((h) => <th key={h} className="p-3">{h}</th>)}</tr></thead>
+          <tbody>{rows.map((row) => <tr key={row.invoiceNo} className="border-b"><td className="p-3 font-medium">{row.invoiceNo}</td><td className="p-3">{new Date(row.date).toLocaleDateString("en-PK")}</td><td className="p-3">{row.customer}</td><td className="p-3">{row.type}</td><td className="p-3">{row.paymentMode}</td><td className="p-3">{money(row.total)}</td><td className="p-3">{money(row.received)}</td><td className="p-3">{money(row.balance)}</td><td className="p-3">{row.status}</td><td className="p-3"><button type="button" onClick={() => void viewInvoice(row.invoiceNo)} className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border px-3 py-2 text-xs font-medium hover:bg-muted"><Eye aria-hidden="true" className="size-3.5" /> View invoice</button></td></tr>)}</tbody></table>
         )}
       </CardContent></Card>
+      <Dialog open={invoiceOpen} onOpenChange={setInvoiceOpen}>
+        <DialogContent className="max-h-[90dvh] max-w-3xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{invoice ? `Invoice ${invoice.orderNumber}` : "Sales invoice"}</DialogTitle>
+            <DialogDescription>Complete item and payment details for this sale.</DialogDescription>
+          </DialogHeader>
+          {invoiceLoading ? <p className="py-12 text-center text-sm text-muted-foreground">Loading invoice…</p>
+            : invoiceError ? <p role="alert" className="rounded-md bg-destructive/10 p-4 text-sm text-destructive">{invoiceError}</p>
+              : invoice && (
+                <div className="space-y-6">
+                  <div className="flex flex-wrap justify-between gap-4 border-b pb-4 text-sm">
+                    <div><p className="font-semibold">{invoice.customerDetails.name}</p><p className="text-muted-foreground">{invoice.customerDetails.phone}</p><p className="text-muted-foreground">{invoice.customerDetails.address}{invoice.customerDetails.area ? `, ${invoice.customerDetails.area}` : ""}, {invoice.customerDetails.city}</p>{invoice.customerDetails.email && <p className="text-muted-foreground">{invoice.customerDetails.email}</p>}</div>
+                    <div className="text-right"><p>{new Date(invoice.createdAt).toLocaleString("en-PK")}</p><p className="mt-1">Status: <strong>{invoice.status}</strong></p><p>Payment: {invoice.paymentMethod} · {invoice.paymentStatus}</p></div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[520px] text-left text-sm">
+                      <thead className="border-b bg-muted/50"><tr><th className="p-3">Product</th><th className="p-3 text-right">Qty</th><th className="p-3 text-right">Price</th><th className="p-3 text-right">Total</th></tr></thead>
+                      <tbody>{invoice.items.map((item, index) => <tr key={`${item.name}-${index}`} className="border-b last:border-0"><td className="p-3"><p className="font-medium">{item.name}</p>{item.variantName && <p className="text-xs text-muted-foreground">{item.variantName}</p>}{(item.sku || item.barcode) && <p className="text-xs text-muted-foreground">{[item.sku && `SKU ${item.sku}`, item.barcode && `Barcode ${item.barcode}`].filter(Boolean).join(" · ")}</p>}</td><td className="p-3 text-right">{item.quantity}</td><td className="p-3 text-right">{money(item.unitPrice)}</td><td className="p-3 text-right font-medium">{money(item.unitPrice * item.quantity)}</td></tr>)}</tbody>
+                    </table>
+                  </div>
+                  <div className="ml-auto w-full max-w-sm space-y-2 border-t pt-4 text-sm">
+                    <div className="flex justify-between"><span>Subtotal</span><span>{money(invoice.subtotal)}</span></div>
+                    {invoice.deliveryCharge > 0 && <div className="flex justify-between"><span>Delivery charge</span><span>{money(invoice.deliveryCharge)}</span></div>}
+                    {(invoice.deliveryCharges ?? 0) > 0 && <div className="flex justify-between"><span>Additional delivery charges</span><span>{money(invoice.deliveryCharges ?? 0)}</span></div>}
+                    <div className="flex justify-between border-t pt-3 text-base font-semibold"><span>Grand total</span><span>{money(invoice.total + (invoice.deliveryCharges ?? 0))}</span></div>
+                    <div className="flex justify-between text-muted-foreground"><span>Received</span><span>{money(invoice.amountReceived ?? 0)}</span></div>
+                    <div className="flex justify-between text-muted-foreground"><span>Balance</span><span>{money(Math.max(0, invoice.total + (invoice.deliveryCharges ?? 0) - (invoice.amountReceived ?? 0)))}</span></div>
+                  </div>
+                </div>
+              )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

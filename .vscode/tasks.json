@@ -1,0 +1,16 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Start IDAI production preview",
+			"type": "shell",
+			"command": "npm.cmd",
+			"args": [
+				"run",
+				"start"
+			],
+			"isBackground": true,
+			"problemMatcher": []
+		}
+	]
+}

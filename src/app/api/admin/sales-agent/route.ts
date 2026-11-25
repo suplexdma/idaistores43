@@ -23,6 +23,8 @@ export async function GET() {
     const sessions = await AIConversation.find()
       .select("sessionId userId messages createdAt updatedAt")
       .sort({ updatedAt: -1 })
+      .limit(100)
+      .slice("messages", -20)
       .lean();
     return NextResponse.json({
       sessions: sessions.map((session) => ({

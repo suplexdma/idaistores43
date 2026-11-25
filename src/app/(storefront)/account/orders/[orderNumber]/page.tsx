@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatPKR } from "@/components/storefront/cart-drawer";
 import { authOptions } from "@/lib/auth-options";
 import { connectToDatabase } from "@/lib/db";
+import { cloudinaryImageUrl, isCloudinaryImageUrl } from "@/lib/cloudinary-url";
 import Order, { type Order as OrderSchema } from "@/models/Order";
 import DeliveryCompany from "@/models/DeliveryCompany";
 import { Types } from "mongoose";
@@ -55,7 +56,7 @@ export default async function CustomerOrderDetailPage({ params }: Props) {
             {order.items.map((item: OrderSchema["items"][number], index: number) => (
               <li key={`${item.productId.toString()}-${item.variantName ?? ""}-${index}`} className="flex items-center gap-4 py-4 first:pt-0 last:pb-0">
                 <div className="relative size-16 shrink-0 overflow-hidden rounded-md bg-muted">
-                  {item.image && <Image src={item.image} alt={item.name} fill sizes="64px" className="object-cover" />}
+                  {item.image && <Image src={cloudinaryImageUrl(item.image, 64)} unoptimized={isCloudinaryImageUrl(item.image)} alt={item.name} fill sizes="64px" className="object-cover" />}
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="font-medium">{item.name}</p>
@@ -82,7 +83,7 @@ export default async function CustomerOrderDetailPage({ params }: Props) {
           <CardHeader><CardTitle className="text-base">Payment summary</CardTitle></CardHeader>
           <CardContent className="space-y-3 text-sm">
             <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>{formatPKR(order.subtotal)}</span></div>
-            <div className="flex justify-between"><span className="text-muted-foreground">Delivery</span><span>{order.deliveryCharge === 0 ? "Free" : formatPKR(order.deliveryCharge)}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Delivery estimate</span><span>{order.deliveryCharge === 0 ? "To be confirmed" : formatPKR(order.deliveryCharge)}</span></div>
             {(order.deliveryCharges ?? 0) > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Additional delivery charges</span><span>{formatPKR(order.deliveryCharges ?? 0)}</span></div>}
             <div className="flex justify-between border-t pt-3 font-semibold"><span>Total · {order.paymentMethod}</span><span>{formatPKR(order.total + (order.deliveryCharges ?? 0))}</span></div>
           </CardContent>

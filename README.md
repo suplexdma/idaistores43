@@ -120,7 +120,7 @@ connection, so it can be used as a Render health check. Production startup uses
 
 Create a Render Web Service from the repository with:
 
-- **Build command:** `npm install && npm run build`
+- **Build command:** `npm ci && npm run build`
 - **Start command:** `npm run start`
 - **Health check path:** `/api/health`
 
@@ -135,7 +135,7 @@ Configure these environment variables in Render:
 | `WHATSAPP_NUMBER` | Yes | Server-side WhatsApp number. Use international digits without `+` or spaces, e.g. `923278505273`. |
 | `NEXT_PUBLIC_WHATSAPP_NUMBER` | Yes | Same WhatsApp number for public links; set before build, e.g. `03278505273`. |
 | `ADMIN_BOOTSTRAP_SECRET` | Initial setup | One-time private secret; rotate/remove after creating the first admin. |
-| `CLOUDINARY_CLOUD_NAME` | For image uploads | Cloudinary cloud name. |
+| `CLOUDINARY_CLOUD_NAME` | For image uploads | Cloudinary cloud name; online payment screenshots require Cloudinary. |
 | `CLOUDINARY_API_KEY` | For image uploads | Cloudinary API key. |
 | `CLOUDINARY_API_SECRET` | For image uploads | Cloudinary API secret. |
 | `OPENROUTER_API_KEY` | For AI chat | Server-side OpenRouter key. |
@@ -180,3 +180,9 @@ In another terminal, confirm `http://localhost:3000/api/health` returns
 
 Order totals, delivery charges, inventory deductions, and customer order access
 are enforced by server-side routes.
+
+Products can optionally store shipping weight (kg) and dimensions. Delivery
+companies, rate bands, and courier reconciliation are managed in
+`/admin/settings/delivery-companies`; shipped orders assigned to a courier are
+added to dispatch reports automatically. Online payment account details and
+submitted payment screenshots are managed in `/admin/online-payments`.

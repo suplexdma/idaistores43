@@ -29,11 +29,7 @@ import {
 } from "@/components/ui/card";
 import { ProductCard, RatingStars, type StorefrontProduct } from "@/components/storefront/product-card";
 import { cloudinaryImageLoader } from "@/lib/cloudinary-url";
-import {
-  formatPKR,
-  FREE_DELIVERY_THRESHOLD,
-  STANDARD_DELIVERY_CHARGE,
-} from "@/components/storefront/cart-drawer";
+import { formatPKR } from "@/components/storefront/cart-drawer";
 import { useCartStore } from "@/lib/cart-store";
 import { ProductReviews, type ApprovedReview } from "@/components/storefront/product-reviews";
 
@@ -56,6 +52,8 @@ export type ProductDetailData = {
   compareAtPrice?: number;
   salePrice?: number;
   stock: number;
+  weight?: number;
+  dimensions?: string;
   categoryName: string;
   images: { url: string; alt: string }[];
   specs: { name: string; value: string }[];
@@ -294,9 +292,7 @@ export function ProductDetails({ product }: { product: ProductDetailData }) {
             <CardContent className="space-y-4 p-4">
               <div className="flex items-start gap-3">
                 <Truck aria-hidden="true" className="mt-0.5 size-4 text-brand-olive" />
-                <p className="text-sm">
-                  <span className="font-medium">Delivery:</span> PKR {STANDARD_DELIVERY_CHARGE} under PKR {FREE_DELIVERY_THRESHOLD.toLocaleString()}, free above.
-                </p>
+                <p className="text-sm"><span className="font-medium">Delivery:</span> Delivery charges vary based on weight, dimensions, and location.</p>
               </div>
               <div className="flex items-start gap-3">
                 <ShieldCheck aria-hidden="true" className="mt-0.5 size-4 text-brand-olive" />
@@ -331,8 +327,14 @@ export function ProductDetails({ product }: { product: ProductDetailData }) {
             product.description ? (
               <div className="product-rich-text" dangerouslySetInnerHTML={{ __html: product.description }} />
             ) : "A thoughtful find, selected with care by IDAI STORES 43."
-          ) : product.specs.length ? (
+          ) : product.specs.length || product.weight != null || product.dimensions ? (
             <dl className="divide-y divide-border">
+              {product.weight != null && (
+                <div className="grid grid-cols-2 gap-4 py-3"><dt className="font-medium text-foreground">Weight</dt><dd>{product.weight} kg</dd></div>
+              )}
+              {product.dimensions && (
+                <div className="grid grid-cols-2 gap-4 py-3"><dt className="font-medium text-foreground">Dimensions</dt><dd>{product.dimensions}</dd></div>
+              )}
               {product.specs.map((spec) => (
                 <div key={spec.name} className="grid grid-cols-2 gap-4 py-3">
                   <dt className="font-medium text-foreground">{spec.name}</dt>

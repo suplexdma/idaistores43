@@ -30,7 +30,13 @@ export async function connectToDatabase(): Promise<typeof mongoose> {
 
   if (!cached.promise) {
     cached.promise = mongoose
-      .connect(uri, { bufferCommands: false })
+      .connect(uri, {
+        bufferCommands: false,
+        maxPoolSize: 10,
+        minPoolSize: 0,
+        maxIdleTimeMS: 30_000,
+        serverSelectionTimeoutMS: 10_000,
+      })
       .catch((error: unknown) => {
         cached.promise = null;
         throw error;

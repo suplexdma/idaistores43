@@ -1,11 +1,12 @@
 import Image from "next/image";
 import Link from "next/link";
 import { Plus } from "lucide-react";
-import { isValidObjectId } from "mongoose";
+import { isValidObjectId, Types } from "mongoose";
 import { Button } from "@/components/ui/button";
 import { ProductRowActions } from "@/components/admin/product-row-actions";
 import { ProductFilters } from "@/components/admin/product-filters";
 import { getAdminSession } from "@/lib/admin-session";
+import { cloudinaryImageUrl, isCloudinaryImageUrl } from "@/lib/cloudinary-url";
 import {
   Card,
   CardContent,
@@ -64,12 +65,15 @@ type AdminProductsPageProps = {
     priceOrder?: string;
     parentCategory?: string;
     category?: string;
+    page?: string;
     branded?: string;
     local?: string;
     minPrice?: string;
     maxPrice?: string;
   };
 };
+
+const productsPerPage = 50;
 
 export default async function AdminProductsPage({ searchParams }: AdminProductsPageProps) {
   const session = await getAdminSession();
@@ -132,13 +136,14 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
   }
 
   if (searchParams?.category && isValidObjectId(searchParams.category)) {
-    const selectedCategory = searchParams.category;
+    const selectedCategory = new Types.ObjectId(searchParams.category);
     andConditions.push({
       $or: [{ category: selectedCategory }, { categories: selectedCategory }],
     });
   } else if (searchParams?.parentCategory && isValidObjectId(searchParams.parentCategory)) {
-    const descendants = await Category.find({ parentCategory: searchParams.parentCategory }).select("_id").lean();
-    const categoryIds = [searchParams.parentCategory, ...descendants.map((category) => category._id)];
+    const selectedParent = new Types.ObjectId(searchParams.parentCategory);
+    const descendants = await Category.find({ parentCategory: selectedParent }).select("_id").lean();
+    const categoryIds = [selectedParent, ...descendants.map((category) => category._id)];
     andConditions.push({
       $or: [{ category: { $in: categoryIds } }, { categories: { $in: categoryIds } }],
     });
@@ -150,19 +155,56 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
   if (maxPrice !== undefined) andConditions.push({ $expr: { $lte: [effectivePriceExpression, maxPrice] } });
   if (andConditions.length > 0) filter.$and = andConditions;
 
-  const [listedProducts, categories, highestPricedProduct] = await Promise.all([
-    Product.find(filter)
-      .sort(sort)
-      .select("name slug price salePrice compareAtPrice stock variants.stock lowStockThreshold status images")
-      .lean(),
+  const requestedPage = Math.max(1, parseNonNegativeInteger(searchParams?.page) ?? 1);
+  const [totalProducts, categories, highestPricedProduct] = await Promise.all([
+    Product.countDocuments(filter),
     Category.find().sort({ name: 1 }).select("name parentCategory").lean(),
     Product.findOne(activeProducts).sort({ price: -1 }).select("price").lean(),
   ]);
-  const products = [...listedProducts];
-  if (searchParams?.priceOrder === "expensive" || searchParams?.priceOrder === "cheap") {
-    const direction = searchParams.priceOrder === "expensive" ? -1 : 1;
-    products.sort((left, right) => direction * (getEffectiveSellingPrice(left) - getEffectiveSellingPrice(right)));
-  }
+  const totalPages = Math.max(1, Math.ceil(totalProducts / productsPerPage));
+  const currentPage = Math.min(requestedPage, totalPages);
+  const skip = (currentPage - 1) * productsPerPage;
+  const priceDirection = searchParams?.priceOrder === "expensive" ? -1 : 1;
+  const products = searchParams?.priceOrder === "expensive" || searchParams?.priceOrder === "cheap"
+    ? await Product.aggregate<{
+      _id: Types.ObjectId;
+      name: string;
+      slug: string;
+      price: number;
+      salePrice?: number | null;
+      compareAtPrice?: number | null;
+      stock: number;
+      variants?: { stock: number }[];
+      lowStockThreshold?: number;
+      status: string;
+      images: { url: string; alt?: string }[];
+    }>([
+      { $match: filter },
+      { $addFields: { _adminEffectivePrice: effectivePriceExpression } },
+      { $sort: { _adminEffectivePrice: priceDirection, _id: 1 } },
+      { $skip: skip },
+      { $limit: productsPerPage },
+      {
+        $project: {
+          name: 1,
+          slug: 1,
+          price: 1,
+          salePrice: 1,
+          compareAtPrice: 1,
+          stock: 1,
+          variants: 1,
+          lowStockThreshold: 1,
+          status: 1,
+          images: 1,
+        },
+      },
+    ])
+    : await Product.find(filter)
+      .sort(sort)
+      .skip(skip)
+      .limit(productsPerPage)
+      .select("name slug price salePrice compareAtPrice stock variants.stock lowStockThreshold status images")
+      .lean();
   const maximumPrice = highestPricedProduct?.price ?? 100000;
   const priceCeiling = Math.max(100, maximumPrice);
   const initialMinPrice = Math.min(parseNonNegativeNumber(searchParams?.minPrice) ?? 0, priceCeiling);
@@ -212,7 +254,7 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
 
       <Card className="overflow-hidden rounded-2xl border-black/[0.06] bg-white shadow-sm">
         <CardHeader className="border-b border-black/[0.05] px-5 py-5 sm:px-6">
-          <CardTitle className="text-base">All products <span className="ml-1 font-normal text-muted-foreground">({products.length})</span></CardTitle>
+          <CardTitle className="text-base">All products <span className="ml-1 font-normal text-muted-foreground">({totalProducts})</span></CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
@@ -231,10 +273,11 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
                 {products.map((product) => (
                   <TableRow key={product._id.toString()}>
                     <TableCell className="pl-5 sm:pl-6">
-                      {product.images[0]?.url ? (
+                      {product.images?.[0]?.url ? (
                         <Image
-                          src={product.images[0].url}
-                          alt={product.images[0].alt || product.name}
+                          src={cloudinaryImageUrl(product.images[0].url, 52)}
+                          unoptimized={isCloudinaryImageUrl(product.images[0].url)}
+                          alt={product.images?.[0]?.alt || product.name}
                           width={52}
                           height={52}
                           className="size-12 rounded-xl border border-black/10 bg-muted object-cover"
@@ -315,6 +358,25 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
           </div>
         </CardContent>
       </Card>
+      {totalPages > 1 && (
+        <nav aria-label="Product pages" className="flex items-center justify-center gap-4">
+          <Link
+            href={buildPageHref(searchParams, currentPage - 1)}
+            aria-disabled={currentPage === 1}
+            className={`rounded-md border px-4 py-2 text-sm font-medium ${currentPage === 1 ? "pointer-events-none opacity-50" : "hover:bg-muted"}`}
+          >
+            Previous
+          </Link>
+          <span className="text-sm text-muted-foreground">Page {currentPage} of {totalPages}</span>
+          <Link
+            href={buildPageHref(searchParams, currentPage + 1)}
+            aria-disabled={currentPage === totalPages}
+            className={`rounded-md border px-4 py-2 text-sm font-medium ${currentPage === totalPages ? "pointer-events-none opacity-50" : "hover:bg-muted"}`}
+          >
+            Next
+          </Link>
+        </nav>
+      )}
     </div>
   );
 }
@@ -331,12 +393,11 @@ function parseNonNegativeNumber(value?: string) {
   return Number.isFinite(parsed) && parsed <= 10_000_000 ? parsed : undefined;
 }
 
-function getEffectiveSellingPrice(product: {
-  price: number;
-  salePrice?: number | null;
-  compareAtPrice?: number | null;
-}) {
-  if (product.compareAtPrice != null && product.compareAtPrice > product.price) return product.price;
-  if (product.salePrice != null && product.salePrice < product.price) return product.salePrice;
-  return product.price;
+function buildPageHref(searchParams: AdminProductsPageProps["searchParams"], page: number) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(searchParams ?? {})) {
+    if (key !== "page" && typeof value === "string" && value) params.set(key, value);
+  }
+  params.set("page", String(page));
+  return `/admin/products?${params.toString()}`;
 }

@@ -95,6 +95,8 @@ export default async function ProductRoute({ params }: ProductRouteProps) {
     compareAtPrice: product.compareAtPrice,
     salePrice: product.salePrice,
     stock: product.stock,
+    weight: product.weight,
+    dimensions: product.dimensions,
     categoryName: category?.name ?? "",
     images: product.images.map((image: ProductSchema["images"][number]) => ({
       url: image.url,

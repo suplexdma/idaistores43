@@ -8,6 +8,7 @@ import InventoryLog from "@/models/InventoryLog";
 import Product, { type Product as ProductSchema } from "@/models/Product";
 import TrashEntry from "@/models/TrashEntry";
 import DeliveryCompany from "@/models/DeliveryCompany";
+import { addShippedOrderToDispatch } from "@/lib/delivery-dispatch";
 
 const statuses = ["Pending", "Confirmed", "Shipped", "Delivered", "Cancelled", "Returned"] as const;
 const sources = ["Website", "WhatsApp", "AI", "AI Generated", "POS"] as const;
@@ -184,7 +185,7 @@ export async function PATCH(request: NextRequest) {
   try {
     await connectToDatabase();
     const currentOrder = await Order.findOne({ _id: orderId, deletedAt: null })
-      .select("status returnedAt total deliveryCharges amountReceived")
+      .select("status returnedAt total deliveryCharges amountReceived deliveryCompanyId deliveryDispatchId")
       .lean();
     if (!currentOrder) {
       return NextResponse.json({ error: "Order not found." }, { status: 404 });
@@ -198,6 +199,19 @@ export async function PATCH(request: NextRequest) {
         { error: "Only confirmed, shipped, or delivered orders can be returned. Cancel pending orders instead." },
         { status: 409 },
       );
+    }
+    const assignedCompanyId = input.deliveryCompanyId !== undefined
+      ? input.deliveryCompanyId
+      : currentOrder.deliveryCompanyId?.toString() ?? null;
+    if (input.status === "Shipped" && !assignedCompanyId) {
+      return NextResponse.json({ error: "Assign a delivery company before marking this order as shipped." }, { status: 400 });
+    }
+    if (
+      currentOrder.deliveryDispatchId &&
+      assignedCompanyId &&
+      assignedCompanyId !== currentOrder.deliveryCompanyId?.toString()
+    ) {
+      return NextResponse.json({ error: "A dispatched order cannot be reassigned to a different delivery company." }, { status: 409 });
     }
 
     const cancelPendingOrder = async (orderId: string, internalNotes?: string) => {
@@ -344,6 +358,9 @@ export async function PATCH(request: NextRequest) {
       .lean();
     if (!order) {
       return NextResponse.json({ error: "Order not found." }, { status: 404 });
+    }
+    if (order.status === "Shipped" && assignedCompanyId) {
+      await addShippedOrderToDispatch(orderId);
     }
 
     return NextResponse.json({

@@ -7,6 +7,7 @@ import { MarkdownContent } from "@/components/storefront/markdown-content";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { cloudinaryImageLoader } from "@/lib/cloudinary-url";
 
 type PostStatus = "Draft" | "Published";
 type PostRecord = {
@@ -208,7 +209,7 @@ export function PostsManager() {
                   <Button type="button" variant="outline" disabled={uploading} onClick={() => fileRef.current?.click()}>{uploading ? "Uploading..." : "Upload cover"}</Button>
                   {draft.coverImage?.url && <Button type="button" variant="ghost" onClick={() => setDraft((current) => ({ ...current, coverImage: undefined }))}>Remove</Button>}
                 </div>
-                {draft.coverImage?.url && <Image src={draft.coverImage.url} alt="Post cover preview" width={640} height={320} unoptimized className="mt-2 aspect-[2/1] max-h-40 w-full rounded-md border object-cover" />}
+                {draft.coverImage?.url && <Image src={draft.coverImage.url} loader={cloudinaryImageLoader} alt="Post cover preview" width={640} height={320} className="mt-2 aspect-[2/1] max-h-40 w-full rounded-md border object-cover" />}
               </div>
               <label className="space-y-2 text-sm font-medium">
                 Status
@@ -241,7 +242,7 @@ export function PostsManager() {
           {loading ? <p role="status" className="p-6 text-sm text-muted-foreground">Loading posts...</p> : posts.length === 0 ? <p className="p-6 text-sm text-muted-foreground">No posts yet.</p> : posts.map((post) => (
             <div key={post._id} className="flex flex-col justify-between gap-3 p-4 sm:flex-row sm:items-center">
               <div className="flex items-center gap-3">
-                {post.coverImage?.url ? <Image src={post.coverImage.url} alt="" width={64} height={48} unoptimized className="size-16 rounded-md object-cover" /> : <span className="flex size-16 items-center justify-center rounded-md bg-muted"><FileText aria-hidden="true" className="size-5 text-muted-foreground" /></span>}
+                {post.coverImage?.url ? <Image src={post.coverImage.url} loader={cloudinaryImageLoader} alt="" width={64} height={48} className="size-16 rounded-md object-cover" /> : <span className="flex size-16 items-center justify-center rounded-md bg-muted"><FileText aria-hidden="true" className="size-5 text-muted-foreground" /></span>}
                 <div>
                   <p className="font-medium">{post.title}</p>
                   <p className="mt-1 text-xs text-muted-foreground">/blog/{post.slug} · {post.status}</p>

@@ -12,6 +12,8 @@ import Order from "@/models/Order";
 import InventoryLog from "@/models/InventoryLog";
 import Product, { type Product as ProductSchema } from "@/models/Product";
 import User from "@/models/User";
+import OnlinePayment from "@/models/OnlinePayment";
+import { deletePrivateImage, uploadPrivateImage } from "@/lib/cloudinary";
 
 const checkoutSchema = z.object({
   customer: z.object({
@@ -34,10 +36,15 @@ const checkoutSchema = z.object({
     .min(1)
     .max(50),
   source: z.enum(["Website", "WhatsApp"]),
-  paymentMethod: z.literal("COD"),
+  paymentMethod: z.enum(["COD", "Online"]),
+  paymentScreenshot: z.string().max(7_000_000).optional(),
+  privateMessage: z.string().trim().max(1000).optional(),
+}).superRefine((input, context) => {
+  if (input.paymentMethod === "Online" && !input.paymentScreenshot) {
+    context.addIssue({ code: "custom", path: ["paymentScreenshot"], message: "Upload your payment screenshot to continue." });
+  }
 });
 
-const DELIVERY_THRESHOLD = 2000;
 const DELIVERY_CHARGE = 300;
 
 type CheckoutInput = z.infer<typeof checkoutSchema>;
@@ -84,7 +91,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "An order can contain up to 30 unique item options." }, { status: 400 });
   }
 
+  let uploadedScreenshot: Awaited<ReturnType<typeof uploadPrivateImage>> | null = null;
+  let orderCommitted = false;
   try {
+    if (input.paymentMethod === "Online" && input.paymentScreenshot) {
+      const validatedImage = decodePaymentScreenshot(input.paymentScreenshot);
+      try {
+        uploadedScreenshot = await uploadPrivateImage(validatedImage.buffer);
+      } catch (error) {
+        console.error("Online payment screenshot upload failed:", error);
+        throw new CheckoutError("Unable to securely save the payment screenshot. Please try again or choose Cash on Delivery.", 503);
+      }
+    }
+
     const db = await connectToDatabase();
     const authSession = await getServerSession(authOptions);
     const userId =
@@ -235,7 +254,7 @@ export async function POST(request: NextRequest) {
           const subtotal = roundMoney(
             snapshots.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0),
           );
-          const deliveryCharge = subtotal >= DELIVERY_THRESHOLD ? 0 : DELIVERY_CHARGE;
+          const deliveryCharge = DELIVERY_CHARGE;
           const total = roundMoney(subtotal + deliveryCharge);
           const orderNumber = await createUniqueOrderNumber(session);
 
@@ -271,7 +290,7 @@ export async function POST(request: NextRequest) {
                 paymentStatus: "Pending",
                 amountReceived: 0,
                 balanceAmount: total,
-                paymentMethod: "COD",
+                paymentMethod: input.paymentMethod,
                 orderSource: input.source,
                 status: "Pending",
                 statusHistory: [{ status: "Pending", timestamp: new Date() }],
@@ -279,6 +298,20 @@ export async function POST(request: NextRequest) {
             ],
             { session },
           );
+          if (input.paymentMethod === "Online" && uploadedScreenshot) {
+            await OnlinePayment.create(
+              [{
+                orderId: order._id,
+                orderNumber: order.orderNumber,
+                customerName: input.customer.name,
+                phone: input.customer.phone,
+                privateMessage: input.privateMessage ?? "",
+                screenshotPublicId: uploadedScreenshot.publicId,
+                screenshotFormat: uploadedScreenshot.format,
+              }],
+              { session },
+            );
+          }
           await InventoryLog.create(
             inventoryMovements.map((movement) => ({
               ...movement,
@@ -344,6 +377,7 @@ export async function POST(request: NextRequest) {
     }
 
     const completedOrder = requireCreatedOrder(createdOrder);
+    orderCommitted = true;
 
     const responseBody: {
       orderNumber: string;
@@ -356,7 +390,16 @@ export async function POST(request: NextRequest) {
       source: input.source,
     };
 
-    if (input.source === "WhatsApp") {
+    if (input.paymentMethod === "Online") {
+      const message = [
+        `Hello IDAI STORES 43, I have submitted online payment for order ${completedOrder.orderNumber}.`,
+        "I will attach my payment screenshot here on WhatsApp for verification.",
+        `Order amount: PKR ${completedOrder.total.toLocaleString("en-PK")}`,
+      ].join("\n");
+      const whatsappNumber = normalizeWhatsAppNumber("03278505273");
+      responseBody.whatsappUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(message)}`;
+      responseBody.message = "Your order was saved. Continue to WhatsApp and attach the payment screenshot.";
+    } else if (input.source === "WhatsApp") {
       const message = [
         `Hello IDAI STORES 43, I have placed order ${completedOrder.orderNumber}.`,
         "Items:",
@@ -365,7 +408,7 @@ export async function POST(request: NextRequest) {
             `- ${item.name}${item.variantName ? ` (${item.variantName})` : ""} x${item.quantity} - PKR ${(item.unitPrice * item.quantity).toLocaleString("en-PK")}`,
         ),
         `Subtotal: PKR ${completedOrder.subtotal.toLocaleString("en-PK")}`,
-        `Delivery: ${completedOrder.deliveryCharge === 0 ? "Free" : `PKR ${completedOrder.deliveryCharge.toLocaleString("en-PK")}`}`,
+        `Delivery estimate: PKR ${completedOrder.deliveryCharge.toLocaleString("en-PK")} (final charges vary based on weight, dimensions, and location)`,
         `Total: PKR ${completedOrder.total.toLocaleString("en-PK")}`,
       ].join("\n");
       const whatsappNumber = normalizeWhatsAppNumber(
@@ -378,6 +421,13 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(responseBody, { status: 201 });
   } catch (error) {
+    if (uploadedScreenshot && !orderCommitted) {
+      try {
+        await deletePrivateImage(uploadedScreenshot.publicId);
+      } catch (cleanupError) {
+        console.error("Unable to remove unused online payment screenshot:", cleanupError);
+      }
+    }
     if (error instanceof CheckoutError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
@@ -391,6 +441,22 @@ export async function POST(request: NextRequest) {
     console.error("Order placement failed:", error);
     return NextResponse.json({ error: "Unable to place your order. Please try again." }, { status: 500 });
   }
+}
+
+function decodePaymentScreenshot(dataUrl: string) {
+  const match = dataUrl.match(/^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/);
+  if (!match) throw new CheckoutError("Payment screenshot must be a JPEG, PNG, or WebP image.", 400);
+  const buffer = Buffer.from(match[2], "base64");
+  if (buffer.length === 0 || buffer.length > 5 * 1024 * 1024) {
+    throw new CheckoutError("Payment screenshot must be 5 MB or smaller.", 400);
+  }
+  const isPng = buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  const isJpeg = buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+  const isWebp = buffer.length >= 12 && buffer.toString("ascii", 0, 4) === "RIFF" && buffer.toString("ascii", 8, 12) === "WEBP";
+  if (!(isPng && match[1] === "png") && !(isJpeg && match[1] === "jpeg") && !(isWebp && match[1] === "webp")) {
+    throw new CheckoutError("The uploaded file does not match its image format.", 400);
+  }
+  return { buffer, format: match[1] };
 }
 
 function groupCartItems(items: OrderLineInput[]) {

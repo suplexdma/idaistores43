@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { productInputSchema } from "@/lib/product-validation";
+import { cloudinaryImageLoader } from "@/lib/cloudinary-url";
 
 type ProductImage = { url: string; publicId: string; alt: string };
 type ProductVariant = { name: string; price?: number; salePrice?: number; stock: number; image?: ProductImage };
@@ -27,6 +28,8 @@ type ProductFormProduct = {
   description: string;
   shortDescription?: string;
   price: number;
+  weight?: number;
+  dimensions?: string;
   compareAtPrice?: number;
   costPrice?: number;
   sku?: string;
@@ -49,6 +52,8 @@ type ProductValues = {
   description: string;
   shortDescription: string;
   price: string;
+  weight: string;
+  dimensions: string;
   compareAtPrice: string;
   costPrice: string;
   sku: string;
@@ -94,6 +99,8 @@ export function ProductForm({ categories: initialCategories, product }: ProductF
     description: product?.description ?? "",
     shortDescription: product?.shortDescription ?? "",
     price: product ? String(product.price) : "",
+    weight: product?.weight != null ? String(product.weight) : "",
+    dimensions: product?.dimensions ?? "",
     compareAtPrice: product?.compareAtPrice != null ? String(product.compareAtPrice) : "",
     costPrice: product?.costPrice != null ? String(product.costPrice) : "",
     sku: product?.sku ?? "",
@@ -281,6 +288,8 @@ export function ProductForm({ categories: initialCategories, product }: ProductF
       shortDescription: values.shortDescription,
       description: values.description,
       price: Number(values.price),
+      weight: values.weight === "" ? undefined : Number(values.weight),
+      dimensions: values.dimensions.trim() || undefined,
       compareAtPrice: values.compareAtPrice === "" ? undefined : Number(values.compareAtPrice),
       costPrice: values.costPrice === "" ? undefined : Number(values.costPrice),
       sku: values.sku || undefined,
@@ -420,7 +429,7 @@ export function ProductForm({ categories: initialCategories, product }: ProductF
                     onDragEnd={() => setDraggedImage(null)}
                     className="group relative overflow-hidden rounded-lg border bg-background"
                   >
-                    <Image src={image.url} alt={image.alt || values.name || "Product image"} width={320} height={240} sizes="(max-width: 640px) 50vw, 33vw" className="aspect-[4/3] w-full object-cover" />
+                    <Image src={image.url} loader={cloudinaryImageLoader} alt={image.alt || values.name || "Product image"} width={320} height={240} sizes="(max-width: 640px) 50vw, 33vw" className="aspect-[4/3] w-full object-cover" />
                     <div className="flex items-center justify-between gap-1 border-t px-2 py-1.5">
                       <span className="flex items-center gap-1 text-xs text-muted-foreground">
                         <GripVertical aria-hidden="true" className="size-3.5" /> Image {index + 1}
@@ -529,6 +538,20 @@ export function ProductForm({ categories: initialCategories, product }: ProductF
             <label className="block space-y-2">
               <span className="text-sm font-medium">Cost price / buying price (PKR) · internal</span>
               <Input type="number" min="0" step="0.01" value={values.costPrice} onChange={(event) => updateValue("costPrice", event.target.value)} />
+            </label>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle className="text-lg">Shipping details</CardTitle></CardHeader>
+          <CardContent className="grid gap-4 sm:grid-cols-2">
+            <label className="block space-y-2">
+              <span className="text-sm font-medium">Weight (kg) <span className="font-normal text-muted-foreground">· optional</span></span>
+              <Input type="number" min="0" step="0.001" value={values.weight} onChange={(event) => updateValue("weight", event.target.value)} />
+            </label>
+            <label className="block space-y-2">
+              <span className="text-sm font-medium">Dimensions (cm) <span className="font-normal text-muted-foreground">· optional</span></span>
+              <Input maxLength={120} value={values.dimensions} onChange={(event) => updateValue("dimensions", event.target.value)} placeholder="10 x 10 x 10 cm" />
             </label>
           </CardContent>
         </Card>
@@ -643,6 +666,7 @@ export function ProductForm({ categories: initialCategories, product }: ProductF
                   {variant.image?.url && (
                     <Image
                       src={variant.image.url}
+                      loader={cloudinaryImageLoader}
                       alt={variant.image.alt || `${values.name} ${variant.name}`}
                       width={64}
                       height={64}

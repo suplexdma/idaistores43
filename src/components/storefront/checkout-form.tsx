@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CreditCard, MapPin, ShieldCheck, Truck } from "lucide-react";
-import { useState } from "react";
+import { ChangeEvent, useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
@@ -18,7 +18,6 @@ import { useLanguage } from "@/lib/language";
 import {
   formatPKR,
   getDeliveryCharge,
-  STANDARD_DELIVERY_CHARGE,
 } from "@/components/storefront/cart-drawer";
 
 const checkoutSchema = z.object({
@@ -33,6 +32,15 @@ const checkoutSchema = z.object({
 type CheckoutValues = z.infer<typeof checkoutSchema>;
 export type CheckoutPrefill = Partial<CheckoutValues>;
 type OrderSource = "Website" | "WhatsApp";
+type CheckoutPaymentMethod = "COD" | "Online";
+type PaymentSettings = {
+  jazzCashNumber: string;
+  easyPaisaNumber: string;
+  bankName: string;
+  accountTitle: string;
+  accountNumber: string;
+  iban: string;
+};
 
 type CheckoutResponse = {
   orderNumber?: string;
@@ -48,8 +56,29 @@ export function CheckoutForm({ prefill }: { prefill: CheckoutPrefill }) {
   const clearCart = useCartStore((state) => state.clearCart);
   const [serverError, setServerError] = useState("");
   const [placingOrder, setPlacingOrder] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<CheckoutPaymentMethod>("COD");
+  const [paymentSettings, setPaymentSettings] = useState<PaymentSettings | null>(null);
+  const [paymentSettingsError, setPaymentSettingsError] = useState("");
+  const [paymentScreenshot, setPaymentScreenshot] = useState("");
+  const [paymentScreenshotName, setPaymentScreenshotName] = useState("");
+  const [paymentScreenshotError, setPaymentScreenshotError] = useState("");
+  const [privateMessage, setPrivateMessage] = useState("");
   const subtotal = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
-  const deliveryCharge = getDeliveryCharge(subtotal);
+  const deliveryCharge = getDeliveryCharge();
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/payment-settings")
+      .then(async (response) => {
+        const data = await response.json() as { settings?: PaymentSettings; error?: string };
+        if (!response.ok) throw new Error(data.error ?? "Unable to load payment account details.");
+        if (active) setPaymentSettings(data.settings ?? null);
+      })
+      .catch((loadError: unknown) => {
+        if (active) setPaymentSettingsError(loadError instanceof Error ? loadError.message : "Unable to load payment account details.");
+      });
+    return () => { active = false; };
+  }, []);
 
   const form = useForm<CheckoutValues>({
     resolver: zodResolver(checkoutSchema),
@@ -63,9 +92,13 @@ export function CheckoutForm({ prefill }: { prefill: CheckoutPrefill }) {
     },
   });
 
-  async function submitOrder(values: CheckoutValues, source: OrderSource) {
+  async function submitOrder(values: CheckoutValues, source: OrderSource, method: CheckoutPaymentMethod = "COD") {
     if (!hasHydrated || items.length === 0) {
       setServerError("Your bag is empty. Add products before checking out.");
+      return;
+    }
+    if (method === "Online" && !paymentScreenshot) {
+      setPaymentScreenshotError("Payment screenshot is required for online payment.");
       return;
     }
 
@@ -85,7 +118,8 @@ export function CheckoutForm({ prefill }: { prefill: CheckoutPrefill }) {
             ...(item.variantName ? { variantName: item.variantName } : {}),
           })),
           source,
-          paymentMethod: "COD",
+          paymentMethod: method,
+          ...(method === "Online" ? { paymentScreenshot, privateMessage } : {}),
         }),
       });
       const result = (await response.json()) as CheckoutResponse;
@@ -101,6 +135,14 @@ export function CheckoutForm({ prefill }: { prefill: CheckoutPrefill }) {
       }
 
       clearCart();
+      if (method === "Online") {
+        if (!result.whatsappUrl) {
+          setServerError(`Your order ${result.orderNumber} was saved, but WhatsApp could not be opened. Please contact support and attach your payment screenshot.`);
+          return;
+        }
+        window.location.assign(result.whatsappUrl);
+        return;
+      }
       if (source === "WhatsApp") {
         if (!result.whatsappUrl) {
           if (whatsappWindow && !whatsappWindow.closed) whatsappWindow.close();
@@ -124,6 +166,36 @@ export function CheckoutForm({ prefill }: { prefill: CheckoutPrefill }) {
     } finally {
       setPlacingOrder(false);
     }
+  }
+
+  function choosePaymentScreenshot(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setPaymentScreenshot("");
+      setPaymentScreenshotName("");
+      setPaymentScreenshotError("Choose a JPEG, PNG, or WebP payment screenshot.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setPaymentScreenshot("");
+      setPaymentScreenshotName("");
+      setPaymentScreenshotError("Payment screenshot must be 5 MB or smaller.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== "string") {
+        setPaymentScreenshotError("Unable to read the payment screenshot. Try another image.");
+        return;
+      }
+      setPaymentScreenshot(reader.result);
+      setPaymentScreenshotName(file.name);
+      setPaymentScreenshotError("");
+    };
+    reader.onerror = () => setPaymentScreenshotError("Unable to read the payment screenshot. Try another image.");
+    reader.readAsDataURL(file);
   }
 
   if (!hasHydrated) {
@@ -158,7 +230,7 @@ export function CheckoutForm({ prefill }: { prefill: CheckoutPrefill }) {
             <Form {...form}>
               <form
                 className="space-y-6"
-                onSubmit={form.handleSubmit((values) => submitOrder(values, "Website"))}
+                onSubmit={form.handleSubmit((values) => submitOrder(values, "Website", paymentMethod))}
               >
                 <div className="grid gap-5 sm:grid-cols-2">
                   <FormField control={form.control} name="name" render={({ field }) => (
@@ -185,13 +257,44 @@ export function CheckoutForm({ prefill }: { prefill: CheckoutPrefill }) {
                   <h2 id="payment-title" className="flex items-center gap-2 font-semibold">
                     <CreditCard aria-hidden="true" className="size-5 text-brand-olive" /> {t("paymentMethod")}
                   </h2>
-                  <div className="mt-3 flex items-start gap-3 rounded-lg border border-brand-olive bg-brand-olive/5 p-4">
-                    <input type="radio" checked readOnly aria-label="Cash on Delivery selected" className="mt-1 accent-brand-olive" />
-                    <div>
-                      <p className="text-sm font-medium">{t("cod")}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">{t("payOnDelivery")}</p>
-                    </div>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <label className={`flex cursor-pointer items-start gap-3 rounded-lg border p-4 ${paymentMethod === "COD" ? "border-brand-olive bg-brand-olive/5" : ""}`}>
+                      <input type="radio" name="payment-method" checked={paymentMethod === "COD"} onChange={() => setPaymentMethod("COD")} className="mt-1 accent-brand-olive" />
+                      <span><span className="block text-sm font-medium">{t("cod")}</span><span className="mt-1 block text-xs text-muted-foreground">{t("payOnDelivery")}</span></span>
+                    </label>
+                    <label className={`flex cursor-pointer items-start gap-3 rounded-lg border p-4 ${paymentMethod === "Online" ? "border-brand-olive bg-brand-olive/5" : ""}`}>
+                      <input type="radio" name="payment-method" checked={paymentMethod === "Online"} onChange={() => setPaymentMethod("Online")} className="mt-1 accent-brand-olive" />
+                      <span><span className="block text-sm font-medium">Online Payment</span><span className="mt-1 block text-xs text-muted-foreground">Pay by JazzCash, Easypaisa, or bank transfer.</span></span>
+                    </label>
                   </div>
+                  {paymentMethod === "Online" && (
+                    <div className="mt-4 space-y-4 rounded-lg border bg-muted/20 p-4">
+                      <div>
+                        <h3 className="text-sm font-semibold">IDAI payment details</h3>
+                        {paymentSettingsError ? <p role="alert" className="mt-2 text-sm text-destructive">{paymentSettingsError}</p>
+                          : paymentSettings ? <dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
+                            {paymentSettings.jazzCashNumber && <div><dt className="text-xs text-muted-foreground">JazzCash</dt><dd className="font-medium">{paymentSettings.jazzCashNumber}</dd></div>}
+                            {paymentSettings.easyPaisaNumber && <div><dt className="text-xs text-muted-foreground">Easypaisa</dt><dd className="font-medium">{paymentSettings.easyPaisaNumber}</dd></div>}
+                            {paymentSettings.bankName && <div><dt className="text-xs text-muted-foreground">Bank</dt><dd className="font-medium">{paymentSettings.bankName}</dd></div>}
+                            {paymentSettings.accountTitle && <div><dt className="text-xs text-muted-foreground">Account title</dt><dd className="font-medium">{paymentSettings.accountTitle}</dd></div>}
+                            {paymentSettings.accountNumber && <div><dt className="text-xs text-muted-foreground">Account number</dt><dd className="font-medium">{paymentSettings.accountNumber}</dd></div>}
+                            {paymentSettings.iban && <div className="sm:col-span-2"><dt className="text-xs text-muted-foreground">IBAN</dt><dd className="break-all font-medium">{paymentSettings.iban}</dd></div>}
+                            {!Object.values(paymentSettings).some(Boolean) && <p className="text-xs text-muted-foreground">Payment account details are not available right now. Contact support before transferring.</p>}
+                          </dl> : <p className="mt-2 text-xs text-muted-foreground">Loading payment instructions…</p>}
+                      </div>
+                      <label className="block space-y-2 text-sm font-medium">
+                        Payment screenshot <span className="text-destructive">*</span>
+                        <input type="file" accept="image/jpeg,image/png,image/webp" onChange={choosePaymentScreenshot} className="block w-full rounded-md border bg-background p-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-brand-olive/10 file:px-3 file:py-1.5 file:text-xs file:font-medium" />
+                        <span className="block text-xs font-normal text-muted-foreground">{paymentScreenshotName ? `Selected: ${paymentScreenshotName}` : "JPEG, PNG or WebP · maximum 5 MB"}</span>
+                      </label>
+                      {paymentScreenshotError && <p role="alert" className="text-sm text-destructive">{paymentScreenshotError}</p>}
+                      <label className="block space-y-2 text-sm font-medium">
+                        Private message <span className="font-normal text-muted-foreground">· optional</span>
+                        <textarea value={privateMessage} onChange={(event) => setPrivateMessage(event.target.value)} maxLength={1000} rows={3} placeholder="Add a note for the store team" className="w-full rounded-md border bg-background px-3 py-2 text-sm font-normal" />
+                      </label>
+                      <p className="text-xs leading-5 text-muted-foreground">After submission you’ll continue to WhatsApp. The screenshot is stored privately; please attach it in WhatsApp too so our team can confirm your payment.</p>
+                    </div>
+                  )}
                 </section>
 
                 {serverError && <p role="alert" className="rounded-md bg-destructive/5 p-3 text-sm text-destructive">{serverError}</p>}
@@ -202,21 +305,19 @@ export function CheckoutForm({ prefill }: { prefill: CheckoutPrefill }) {
                     className="w-full"
                     disabled={placingOrder}
                   >
-                    {placingOrder ? "Placing your order..." : t("placeOrder")}
+                    {placingOrder ? "Submitting your order..." : paymentMethod === "Online" ? "Submit online payment" : t("placeOrder")}
                   </Button>
-                  <Button
+                  {paymentMethod === "COD" && <Button
                     type="button"
                     size="lg"
                     variant="outline"
                     className="w-full border-brand-olive text-brand-olive hover:bg-brand-olive hover:text-white"
                     disabled={placingOrder}
-                    onClick={() => void form.handleSubmit((values) => submitOrder(values, "WhatsApp"))()}
+                    onClick={() => void form.handleSubmit((values) => submitOrder(values, "WhatsApp", "COD"))()}
                   >
                     {placingOrder ? "Saving order..." : t("placeOrderWhatsApp")}
-                  </Button>
-                  <p className="text-center text-xs text-muted-foreground">
-                    {t("orderSavedBeforeWhatsApp")}
-                  </p>
+                  </Button>}
+                  {paymentMethod === "COD" && <p className="text-center text-xs text-muted-foreground">{t("orderSavedBeforeWhatsApp")}</p>}
                 </div>
               </form>
             </Form>
@@ -245,14 +346,12 @@ export function CheckoutForm({ prefill }: { prefill: CheckoutPrefill }) {
             </ul>
             <div className="mt-5 space-y-3 border-t pt-4 text-sm">
               <div className="flex justify-between"><span className="text-muted-foreground">{t("subtotal")}</span><span>{formatPKR(subtotal)}</span></div>
-              <div className="flex justify-between"><span className="flex items-center gap-2 text-muted-foreground"><Truck aria-hidden="true" className="size-4" />{t("delivery")}</span><span>{deliveryCharge === 0 ? t("free") : formatPKR(STANDARD_DELIVERY_CHARGE)}</span></div>
+              <div className="flex justify-between"><span className="flex items-center gap-2 text-muted-foreground"><Truck aria-hidden="true" className="size-4" />Delivery estimate</span><span>{formatPKR(deliveryCharge)}</span></div>
               <div className="flex justify-between border-t pt-3 text-base font-semibold"><span>{t("total")}</span><span>{formatPKR(subtotal + deliveryCharge)}</span></div>
             </div>
-            {subtotal < 2000 && (
-              <p className="mt-4 rounded-md bg-brand-olive/10 p-3 text-xs leading-5 text-brand-charcoal">
-                {t("moreForFreeDelivery").replace("{amount}", formatPKR(2000 - subtotal))}
-              </p>
-            )}
+            <p className="mt-4 rounded-md bg-brand-olive/10 p-3 text-xs leading-5 text-brand-charcoal">
+              Delivery charges vary based on weight, dimensions, and location.
+            </p>
             <p className="mt-4 flex items-center justify-center gap-2 text-xs text-muted-foreground">
               <ShieldCheck aria-hidden="true" className="size-4 text-brand-olive" /> Your order and details are protected.
             </p>

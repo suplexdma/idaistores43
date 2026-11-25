@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { Package, Printer, Search, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cloudinaryImageLoader } from "@/lib/cloudinary-url";
 
 const ORDER_STATUSES = ["Pending", "Confirmed", "Shipped", "Delivered", "Cancelled", "Returned"] as const;
 const PAYMENT_STATUSES = ["Pending", "Partial", "Paid", "Refunded"] as const;
@@ -301,7 +302,7 @@ export function OrderManagement({ canEdit }: { canEdit: boolean }) {
                         <div className="flex min-w-0 flex-1 items-start gap-3">
                           <div className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-md border bg-muted">
                             {item.image
-                              ? <Image src={item.image} alt={item.name} width={48} height={48} unoptimized className="size-full object-cover" />
+                              ? <Image src={item.image} loader={cloudinaryImageLoader} alt={item.name} width={48} height={48} className="size-full object-cover" />
                               : <Package aria-hidden="true" className="size-5 text-muted-foreground" />}
                           </div>
                           <div className="min-w-0">
@@ -319,7 +320,7 @@ export function OrderManagement({ canEdit }: { canEdit: boolean }) {
                   <div className="space-y-2 rounded-lg border p-4 text-sm">
                     <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>{money(selectedOrder.subtotal)}</span></div>
                     <div className="flex justify-between"><span className="text-muted-foreground">Discounts</span><span>{money(0)}</span></div>
-                    <div className="flex justify-between"><span className="text-muted-foreground">Delivery charges</span><span>{selectedOrder.deliveryCharge + selectedOrder.deliveryCharges ? money(selectedOrder.deliveryCharge + selectedOrder.deliveryCharges) : "Free"}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Delivery estimate / charges</span><span>{selectedOrder.deliveryCharge + selectedOrder.deliveryCharges ? money(selectedOrder.deliveryCharge + selectedOrder.deliveryCharges) : "To be confirmed"}</span></div>
                     <div className="flex justify-between border-t pt-2 font-semibold"><span>Total amount</span><span>{money(selectedOrder.total + selectedOrder.deliveryCharges)}</span></div>
                   </div>
                 </div>

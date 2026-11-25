@@ -68,7 +68,7 @@ The store sells only non-food merchandise: ${AI_NON_FOOD_CATEGORIES.join(", ")}.
 Never recommend, mention as a recommendation, or claim to sell groceries, food, or perishable products. If asked for them, politely decline and suggest one or two of the supported non-food categories.
 Never invent product names, prices, availability, or stock. For every product, item, category, price, or availability question, call searchProducts immediately without asking permission. For every matching product returned by searchProducts, call getStock before responding. Call getProductCount for catalog-count questions. If an exact match is not found, suggest only verified alternatives from the live database rather than ending with an apology. Include exact productUrl values from tool results as clickable Markdown links. Only state factual product details present in tool results.
 Understand and reply in English or Roman Urdu, matching the customer's language. For image attachments, describe only visible non-food items; do not identify food as a store product or guess prices or availability.
-Cash on Delivery is the only payment method. Delivery is PKR 300 below PKR 2,000 and free at or above PKR 2,000.
+Cash on Delivery is available. The current delivery estimate is PKR 300; final delivery charges vary based on weight, dimensions, and location.
 When a customer asks to add an item to their bag, verify it with searchProducts and getStock, then call addToCart with the exact product, option, and requested quantity. Never imply an item was added unless addToCart succeeds.
 When the customer only asks to add something to their bag, use addToCart. If they ask you to place an order, do not stop after adding products to the bag: collect the guest customer's name, phone, city, full address, and requested items, then use the order workflow below.
 For orders, offer to place them yourself and say exactly: "Main aapka order khud confirm kar sakta hoon." Call quoteOrder to validate every item, current price and stock, then show that exact summary with line totals, delivery and final total before asking for confirmation. The server will show the verified quote to the customer. Call createOrder only after the customer's latest message explicitly confirms that quoted order, and reuse exactly the quoted items and customer details. Guest checkout is allowed; sign-in is not required. Never claim an order exists unless createOrder returns a successful order number. Orders use only live catalog prices and stock.
@@ -919,7 +919,7 @@ async function quoteAIOrder(rawArguments: unknown) {
   }
 
   const subtotal = roundCurrency(quotedItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0));
-  const deliveryCharge = subtotal >= 2000 ? 0 : 300;
+  const deliveryCharge = 300;
   return {
     quoteId: randomUUID(),
     items: quotedItems,
@@ -1072,7 +1072,7 @@ async function createAIOrder(
       throw new AIOrderValidationError("A product price or option changed after the quote. Prepare and show a fresh order summary before asking for confirmation.");
     }
     const subtotal = roundCurrency(orderItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0));
-    const deliveryCharge = subtotal >= 2000 ? 0 : 300;
+    const deliveryCharge = 300;
     if (subtotal !== quoted.data.subtotal || deliveryCharge !== quoted.data.deliveryCharge || subtotal + deliveryCharge !== quoted.data.total) {
       throw new AIOrderValidationError("The order total changed after the quote. Prepare and show a fresh order summary before asking for confirmation.");
     }
@@ -1379,7 +1379,7 @@ function renderOrderQuote(rawQuote: unknown) {
     ...itemLines,
     "",
     `Subtotal: PKR ${quote.subtotal.toLocaleString("en-PK")}`,
-    `Delivery: ${quote.deliveryCharge === 0 ? "FREE" : `PKR ${quote.deliveryCharge.toLocaleString("en-PK")}`}`,
+    `Delivery estimate: PKR ${quote.deliveryCharge.toLocaleString("en-PK")} (final charges vary based on weight, dimensions, and location)`,
     `**Total: PKR ${quote.total.toLocaleString("en-PK")}**`,
     "Payment: Cash on Delivery",
     "",
@@ -1462,7 +1462,7 @@ function answerUsesVerifiedFacts(answer: string, toolResults: string[]) {
       }
     });
     const isVerified =
-      (isDeliveryClaim && (amount === 300 || amount === 2000)) ||
+      (isDeliveryClaim && amount === 300) ||
       verifiedPrices.some((price) => price === amount);
     if (!isVerified) return false;
   }

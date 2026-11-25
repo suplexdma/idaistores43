@@ -27,6 +27,8 @@ export const productInputBaseSchema = z.object({
   category: z.string().regex(/^[a-f\d]{24}$/i).optional(),
   categories: z.array(z.string().regex(/^[a-f\d]{24}$/i)).max(50).optional(),
   price: z.number().finite().min(0),
+  weight: z.number().finite().min(0).optional(),
+  dimensions: z.string().trim().max(120).optional(),
   costPrice: z.number().finite().min(0).optional(),
   compareAtPrice: z.number().finite().min(0).optional(),
   salePrice: z.number().finite().min(0).nullable().optional(),

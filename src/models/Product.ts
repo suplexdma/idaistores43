@@ -34,6 +34,8 @@ const productSchema = new Schema(
     shortDescription: { type: String, trim: true, maxlength: 300 },
     description: { type: String, trim: true },
     price: { type: Number, required: true, min: 0 },
+    weight: { type: Number, min: 0 },
+    dimensions: { type: String, trim: true, maxlength: 120 },
     costPrice: { type: Number, min: 0, select: false },
     compareAtPrice: { type: Number, min: 0 },
     salePrice: { type: Number, min: 0 },

@@ -8,7 +8,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   formatPKR,
   getDeliveryCharge,
-  STANDARD_DELIVERY_CHARGE,
 } from "@/components/storefront/cart-drawer";
 import { getCartItemKey, useCartStore } from "@/lib/cart-store";
 import { cloudinaryImageLoader } from "@/lib/cloudinary-url";
@@ -19,7 +18,7 @@ export function CartPage() {
   const updateQuantity = useCartStore((state) => state.updateQuantity);
   const removeFromCart = useCartStore((state) => state.removeFromCart);
   const subtotal = items.reduce((total, item) => total + item.unitPrice * item.quantity, 0);
-  const delivery = getDeliveryCharge(subtotal);
+  const delivery = getDeliveryCharge();
 
   if (!hasHydrated) {
     return (
@@ -127,17 +126,15 @@ export function CartPage() {
                 <span>{formatPKR(subtotal)}</span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Delivery</span>
-                <span>{delivery === 0 ? "Free" : formatPKR(STANDARD_DELIVERY_CHARGE)}</span>
+                <span className="text-muted-foreground">Delivery estimate</span>
+                <span>{formatPKR(delivery)}</span>
               </div>
               <div className="flex justify-between border-t pt-4 font-semibold">
                 <span>Total</span>
                 <span>{formatPKR(subtotal + delivery)}</span>
               </div>
               <div className="rounded-md bg-brand-olive/10 p-3 text-xs leading-5 text-brand-charcoal">
-                {delivery === 0
-                  ? "Your order qualifies for free delivery."
-                  : `Add ${formatPKR(2000 - subtotal)} more for free delivery.`}
+                Delivery charges vary based on weight, dimensions, and location.
               </div>
               <Button asChild className="w-full" size="lg">
                 <Link href="/checkout">Continue to Checkout</Link>

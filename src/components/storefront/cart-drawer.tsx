@@ -14,15 +14,14 @@ import {
 import { getCartItemKey, useCartStore } from "@/lib/cart-store";
 import { cloudinaryImageLoader } from "@/lib/cloudinary-url";
 
-export const FREE_DELIVERY_THRESHOLD = 2000;
 export const STANDARD_DELIVERY_CHARGE = 300;
 
 export function formatPKR(amount: number) {
   return `PKR ${amount.toLocaleString("en-PK")}`;
 }
 
-export function getDeliveryCharge(subtotal: number) {
-  return subtotal >= FREE_DELIVERY_THRESHOLD ? 0 : STANDARD_DELIVERY_CHARGE;
+export function getDeliveryCharge() {
+  return STANDARD_DELIVERY_CHARGE;
 }
 
 export function CartDrawer() {
@@ -32,7 +31,6 @@ export function CartDrawer() {
   const updateQuantity = useCartStore((state) => state.updateQuantity);
   const removeFromCart = useCartStore((state) => state.removeFromCart);
   const subtotal = items.reduce((total, item) => total + item.unitPrice * item.quantity, 0);
-
   return (
     <Sheet open={isOpen} onOpenChange={(open) => (!open ? closeCart() : undefined)}>
       <SheetContent className="flex w-[min(100vw,440px)] flex-col p-0 sm:max-w-md">
@@ -127,19 +125,13 @@ export function CartDrawer() {
                 <span className="font-medium">{formatPKR(subtotal)}</span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Delivery</span>
-                <span className="font-medium">
-                  {getDeliveryCharge(subtotal) === 0 ? "Free" : formatPKR(STANDARD_DELIVERY_CHARGE)}
-                </span>
+                <span className="text-muted-foreground">Delivery estimate</span>
+                <span className="font-medium">{formatPKR(getDeliveryCharge())}</span>
               </div>
               <Button asChild className="w-full" size="lg" onClick={closeCart}>
                 <Link href="/cart">View bag & continue</Link>
               </Button>
-              <p className="text-center text-xs text-muted-foreground">
-                {subtotal >= FREE_DELIVERY_THRESHOLD
-                  ? "Your order qualifies for free delivery."
-                  : `Add ${formatPKR(FREE_DELIVERY_THRESHOLD - subtotal)} more for free delivery.`}
-              </p>
+              <p className="text-center text-xs text-muted-foreground">Delivery charges vary based on weight, dimensions, and location.</p>
             </div>
           </>
         )}
